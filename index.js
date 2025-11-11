@@ -1,4 +1,10 @@
-// index.js (servidor, actualizado: cinta completa, pending por base, collect/reset security)
+// index.js (Servidor completo y actualizado)
+// Reemplaza tu index.js con este para mantener la lógica online y las nuevas acciones:
+// - cinta continua (left->right) que elimina brainrots al salir del canvas
+// - pending por base (income tick cada 1s)
+// - collectIncome, resetSecurity (gratuito pero solo si expiró), upgradeSecurity, stealRequest
+// - compra/venta validadas en servidor
+
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -8,25 +14,32 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = createServer(app);
+
+// permitir CORS amplio para pruebas; en producción restringe al dominio de tu cliente
 const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(express.static(path.join(__dirname, "public")));
 const PORT = process.env.PORT || 3000;
 
-/* Config */
-const CANVAS_WIDTH = 1100; // ancho del canvas (coincide con public/index.html)
+/* ---------------- CONFIG ---------------- */
+const CANVAS_WIDTH = 1100;
 const CANVAS_HEIGHT = 600;
 const BELT_Y = 420;
-const BELT_HEIGHT = 72;
-const RESET_SECURITY_COST = 50; // coste para reiniciar seguridad (ajusta si quieres)
-const INCOME_TICK_MS = 1000; // cada segundo se acumula ingreso
+const BELT_H = 72;
+const SPAWN_INTERVAL_MS = 1200;
+const BELT_STEP_MS = 50;
+const INCOME_TICK_MS = 1000;
+const RESET_SECURITY_COST = 0; // gratuito (según petición)
+const UPGRADE_SECURITY_COST = 100; // si quieres cambiarlo
+/* ---------------------------------------- */
 
-/* Estado global */
-let players = {}; // id -> { id, name, color, x,y,w,h, money, base:{ ownedList:[], pending:0, securityDuration(ms), securityUntil(ms), slot, x,y,w,h } }
-let belt = [];
+/* Estado */
+let players = {}; // id -> { id,name,color,x,y,w,h,money, base:{ ownedList:[], pending, securityDuration(ms), securityUntil(ms), slot,x,y,w,h } }
+let belt = [];    // lista de brainrots sincronizados a todos
 let spawnCounter = 0;
 let nextBaseSlot = 0;
 
+/* Posiciones de base (slots) */
 const BASE_SLOTS = [
   { x: 720, y: 60 },
   { x: 920, y: 60 },
@@ -36,9 +49,15 @@ const BASE_SLOTS = [
   { x: 920, y: 460 },
 ];
 
+/* Util */
 function randRange(a,b){ return Math.floor(a + Math.random() * (b - a + 1)); }
+function distance(a,b){
+  const dx = (a.x||0) - (b.x||0);
+  const dy = (a.y||0) - (b.y||0);
+  return Math.hypot(dx,dy);
+}
 
-/* Generador global de brainrots (todos ven los mismos) */
+/* ---------------- Spawn brainrots (global) ---------------- */
 function spawnBrainrot(){
   spawnCounter++;
   let price;
@@ -48,30 +67,30 @@ function spawnBrainrot(){
   const special = Math.random() < 0.03;
   const br = {
     id: Date.now() + Math.random(),
-    x: -60,
-    y: BELT_Y + 8 + Math.random() * (BELT_HEIGHT - 16), // dentro de la cinta
+    x: -Math.random() * 300,
+    y: BELT_Y + 8 + Math.random() * (BELT_H - 16),
     w: 48, h: 48,
-    vx: 70,
+    vx: 2.5 + Math.random()*1.2, // px per tick (will be moved each BELT_STEP_MS)
     price, special
   };
   belt.push(br);
-  io.emit('beltUpdate', belt);
 }
 
-/* Mover belt, eliminar items que pasan al otro lado (CANVAS_WIDTH) */
+/* Empezar spawn periódicamente */
+setInterval(()=>spawnBrainrot(), SPAWN_INTERVAL_MS);
+
+/* ---------------- Mover cinta y eliminar al salir ---------------- */
 setInterval(()=>{
-  for(const b of belt) b.x += b.vx * 0.05;
-  // eliminamos brainrots que salgan del canvas derecho
+  for(const b of belt) b.x += b.vx;
+  // eliminar los que pasan del canvas derecho
   const before = belt.length;
-  belt = belt.filter(b => (b.x + b.w) < CANVAS_WIDTH);
+  belt = belt.filter(b => (b.x + b.w) < CANVAS_WIDTH + 20);
   if(belt.length !== before) io.emit('beltUpdate', belt);
-  // emitimos belt de todos modos para sincronía visual
+  // emitir de todas formas para mantener sincronía visual
   io.emit('beltUpdate', belt);
-}, 50);
+}, BELT_STEP_MS);
 
-setInterval(()=>spawnBrainrot(), 1200);
-
-/* Income tick: calcular ganancias pasivas y sumar a pending por jugador */
+/* ---------------- Income tick: acumular pending por base ---------------- */
 setInterval(()=>{
   let changed = false;
   for(const id in players){
@@ -79,7 +98,7 @@ setInterval(()=>{
     if(!p || !p.base) continue;
     let earned = 0;
     for(const item of p.base.ownedList){
-      // cada segundo gano item.gain (si no existe, calc)
+      // gain formula = price/1000, special *2
       const gain = item.gain || (item.price / 1000 * (item.special ? 2 : 1));
       earned += gain;
     }
@@ -91,14 +110,7 @@ setInterval(()=>{
   if(changed) io.emit('players', players);
 }, INCOME_TICK_MS);
 
-/* util distancia */
-function distance(a,b){
-  const dx = (a.x||0) - (b.x||0);
-  const dy = (a.y||0) - (b.y||0);
-  return Math.hypot(dx,dy);
-}
-
-/* Socket handlers */
+/* ---------------- Socket.IO ---------------- */
 io.on('connection', (socket) => {
   console.log('Jugador conectado:', socket.id);
 
@@ -106,6 +118,7 @@ io.on('connection', (socket) => {
   socket.emit('beltUpdate', belt);
   socket.emit('players', players);
 
+  /* JOIN: crear jugador y su base */
   socket.on('join', (p) => {
     const slot = nextBaseSlot % BASE_SLOTS.length;
     const basePos = BASE_SLOTS[slot];
@@ -120,7 +133,7 @@ io.on('connection', (socket) => {
       base: {
         ownedList: [],
         pending: 0,
-        securityDuration: 60 * 1000, // 60s
+        securityDuration: 60 * 1000, // 60s por defecto
         securityUntil: Date.now() + 60*1000,
         slot,
         x: basePos.x,
@@ -133,7 +146,7 @@ io.on('connection', (socket) => {
     io.emit('players', players);
     socket.broadcast.emit('playerJoined', players[socket.id]);
 
-    // opcional: regalar 10$ a los demás
+    // opcional: dar 10$ a los demás (como premisa previa)
     for(const id in players){
       if(id !== socket.id){
         players[id].money += 10;
@@ -143,6 +156,7 @@ io.on('connection', (socket) => {
     io.emit('players', players);
   });
 
+  /* MOVE: actualizar posición del jugador */
   socket.on('move', (p) => {
     if(players[socket.id]){
       players[socket.id] = { ...players[socket.id], ...p };
@@ -150,6 +164,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  /* setInfo: nombre/color */
   socket.on('setInfo', (info) => {
     if(players[socket.id]){
       players[socket.id].name = info.name || players[socket.id].name;
@@ -158,15 +173,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  /* Compra: servidor valida existencia y dinero */
+  /* BUY: comprar brainrot de la cinta */
   socket.on('buyBrainrot', (brId) => {
     const me = players[socket.id];
-    if(!me) return socket.emit('actionResult', { ok:false, msg: 'No estás registrado en el servidor.' });
+    if(!me) return socket.emit('actionResult', { ok:false, msg: 'No estás registrado.' });
+
     const idx = belt.findIndex(b => b.id === brId);
     if(idx < 0) return socket.emit('actionResult', { ok:false, msg: 'Ese brainrot ya no existe.' });
+
     const br = belt[idx];
     if(me.money < br.price) return socket.emit('actionResult', { ok:false, msg: 'No tienes suficiente dinero.' });
 
+    // realizar compra: descontar, añadir a base, quitar de cinta
     me.money -= br.price;
     const gain = (br.price / 1000) * (br.special ? 2 : 1);
     me.base.ownedList.push({ price: br.price, special: br.special, gain });
@@ -177,7 +195,7 @@ io.on('connection', (socket) => {
     socket.emit('actionResult', { ok:true, msg: `Compraste un brainrot por ${br.price}$` });
   });
 
-  /* Vender desde la base */
+  /* SELL: vender desde la base (índice) */
   socket.on('sellFromBase', (index) => {
     const me = players[socket.id];
     if(!me) return;
@@ -189,56 +207,57 @@ io.on('connection', (socket) => {
     socket.emit('actionResult', { ok:true, msg: `Vendiste un brainrot por ${item.price}$` });
   });
 
-  /* Mejorar seguridad (ya existía) */
+  /* UPGRADE security (paga) */
   socket.on('upgradeSecurity', () => {
     const me = players[socket.id];
     if(!me) return;
-    const cost = 100;
-    if(me.money < cost) return socket.emit('actionResult', { ok:false, msg: 'No tienes suficiente dinero para mejorar seguridad.' });
+    const cost = UPGRADE_SECURITY_COST;
+    if(me.money < cost) return socket.emit('actionResult', { ok:false, msg: `No tienes ${cost}$ para mejorar seguridad.` });
     me.money -= cost;
-    me.base.securityDuration += 30 * 1000; // +30s
+    me.base.securityDuration += 30*1000; // +30s
     me.base.securityUntil = Date.now() + me.base.securityDuration;
     io.emit('players', players);
     socket.emit('actionResult', { ok:true, msg: 'Seguridad mejorada.' });
   });
 
-  /* Reiniciar seguridad (botón en la base) */
+  /* RESET security (gratuito pero solo si ya expiró) */
   socket.on('resetSecurity', () => {
     const me = players[socket.id];
     if(!me) return;
-    // si quieres que sea gratuito, pon cost = 0
-    const cost = RESET_SECURITY_COST;
-    if(me.money < cost) return socket.emit('actionResult', { ok:false, msg: `Necesitas ${cost}$ para reiniciar seguridad.` });
-    me.money -= cost;
+    const now = Date.now();
+    if(now < (me.base.securityUntil || 0)){
+      return socket.emit('actionResult', { ok:false, msg: 'La seguridad aún está activa; no puedes reiniciarla todavía.' });
+    }
+    // reiniciamos al duration actual (gratuito)
     me.base.securityUntil = Date.now() + me.base.securityDuration;
     io.emit('players', players);
-    socket.emit('actionResult', { ok:true, msg: `Seguridad reiniciada (${me.base.securityDuration/1000}s).` });
+    socket.emit('actionResult', { ok:true, msg: `Seguridad reiniciada por ${ (me.base.securityDuration/1000) }s.` });
   });
 
-  /* Recoger ingresos acumulados en base (pending -> money) */
+  /* COLLECT income (pending -> money) */
   socket.on('collectIncome', () => {
     const me = players[socket.id];
     if(!me) return;
     const pending = Number(me.base.pending || 0);
     if(pending <= 0) return socket.emit('actionResult', { ok:false, msg: 'No tienes ingresos pendientes.' });
-    // traspasar
     me.money += pending;
     me.base.pending = 0;
     io.emit('players', players);
     socket.emit('actionResult', { ok:true, msg: `Has recogido ${pending.toFixed(2)}$` });
   });
 
-  /* Intento de robo */
+  /* STEAL: solicitar robar la base de targetId */
   socket.on('stealRequest', (targetId) => {
     const thief = players[socket.id];
     const victim = players[targetId];
     if(!thief) return socket.emit('actionResult', { ok:false, msg: 'No estás activo.' });
     if(!victim) return socket.emit('actionResult', { ok:false, msg: 'Objetivo no encontrado.' });
 
-    // comprobación distancia entre posiciones (evita spoofing)
+    // comprobación de distancia (usa posiciones que el cliente envía con move)
     const dist = distance(thief, victim);
     if(dist > 220) return socket.emit('actionResult', { ok:false, msg: 'Estás demasiado lejos de la base para robar.' });
 
+    // seguridad
     if(Date.now() < (victim.base.securityUntil || 0)){
       return socket.emit('actionResult', { ok:false, msg: 'La base está protegida por seguridad.' });
     }
@@ -246,11 +265,13 @@ io.on('connection', (socket) => {
     const avail = victim.base.ownedList.length;
     if(avail === 0) return socket.emit('actionResult', { ok:false, msg: 'No hay nada que robar.' });
 
+    // cuántos robar — 1 o 2 (puedes ajustar)
     const take = Math.min(avail, (Math.random() < 0.5 ? 1 : 2));
-    // robar los primeros take (podemos hacerlo aleatorio si quieres)
+    // coger primeros take (si prefieres aleatorio, mezclar array)
     const stolen = victim.base.ownedList.splice(0, take);
     for(const s of stolen) thief.base.ownedList.push(s);
 
+    // reactivar seguridad en víctima (cooldown mínimo 30s)
     victim.base.securityUntil = Date.now() + Math.max(30*1000, victim.base.securityDuration);
     io.emit('players', players);
 
@@ -258,6 +279,7 @@ io.on('connection', (socket) => {
     io.to(targetId).emit('actionResult', { ok:false, msg: `Te han robado ${stolen.length} brainrot(s)!` });
   });
 
+  /* Disconnect */
   socket.on('disconnect', () => {
     delete players[socket.id];
     io.emit('playerDisconnected', socket.id);
@@ -266,5 +288,5 @@ io.on('connection', (socket) => {
   });
 });
 
-/* arrancar */
+/* arrancar servidor */
 server.listen(PORT, () => console.log('Servidor en puerto', PORT));
