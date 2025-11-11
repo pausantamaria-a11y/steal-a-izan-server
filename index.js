@@ -1,10 +1,4 @@
-// index.js (Servidor completo y actualizado)
-// Reemplaza tu index.js con este para mantener la lógica online y las nuevas acciones:
-// - cinta continua (left->right) que elimina brainrots al salir del canvas
-// - pending por base (income tick cada 1s)
-// - collectIncome, resetSecurity (gratuito pero solo si expiró), upgradeSecurity, stealRequest
-// - compra/venta validadas en servidor
-
+// index.js - servidor actualizado para el cliente nuevo
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -14,32 +8,27 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = createServer(app);
-
-// permitir CORS amplio para pruebas; en producción restringe al dominio de tu cliente
 const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(express.static(path.join(__dirname, "public")));
 const PORT = process.env.PORT || 3000;
 
-/* ---------------- CONFIG ---------------- */
+/* CONFIG */
 const CANVAS_WIDTH = 1100;
 const CANVAS_HEIGHT = 600;
 const BELT_Y = 420;
 const BELT_H = 72;
 const SPAWN_INTERVAL_MS = 1200;
-const BELT_STEP_MS = 50;
+const BELT_TICK_MS = 50; // tick para mover belt
 const INCOME_TICK_MS = 1000;
-const RESET_SECURITY_COST = 0; // gratuito (según petición)
-const UPGRADE_SECURITY_COST = 100; // si quieres cambiarlo
-/* ---------------------------------------- */
+const UPGRADE_SECURITY_COST = 100;
 
 /* Estado */
-let players = {}; // id -> { id,name,color,x,y,w,h,money, base:{ ownedList:[], pending, securityDuration(ms), securityUntil(ms), slot,x,y,w,h } }
-let belt = [];    // lista de brainrots sincronizados a todos
+let players = {}; // id -> { id,name,color,x,y,w,h,money, base:{ownedList:[], pending, securityDuration, securityUntil, slot, x,y,w,h} }
+let belt = [];
 let spawnCounter = 0;
 let nextBaseSlot = 0;
 
-/* Posiciones de base (slots) */
 const BASE_SLOTS = [
   { x: 720, y: 60 },
   { x: 920, y: 60 },
@@ -49,48 +38,44 @@ const BASE_SLOTS = [
   { x: 920, y: 460 },
 ];
 
-/* Util */
 function randRange(a,b){ return Math.floor(a + Math.random() * (b - a + 1)); }
-function distance(a,b){
-  const dx = (a.x||0) - (b.x||0);
-  const dy = (a.y||0) - (b.y||0);
-  return Math.hypot(dx,dy);
-}
+function distance(a,b){ const dx=(a.x||0)-(b.x||0); const dy=(a.y||0)-(b.y||0); return Math.hypot(dx,dy); }
 
-/* ---------------- Spawn brainrots (global) ---------------- */
+/* Spawn global de brainrots (todos ven los mismos). vx en px/s (coincide con cliente que usa 70) */
 function spawnBrainrot(){
   spawnCounter++;
   let price;
-  if(spawnCounter % 3 === 0) price = randRange(5000,15000);
-  else if(spawnCounter % 3 === 1) price = randRange(1,500);
+  if (spawnCounter % 3 === 0) price = randRange(5000,15000);
+  else if (spawnCounter % 3 === 1) price = randRange(1,500);
   else price = randRange(500,5000);
   const special = Math.random() < 0.03;
   const br = {
     id: Date.now() + Math.random(),
-    x: -Math.random() * 300,
-    y: BELT_Y + 8 + Math.random() * (BELT_H - 16),
+    x: -60 - Math.random()*200, // empieza detrás del borde izquierdo
+    y: BELT_Y + 8 + Math.random() * (BELT_H - 16), // siempre dentro de la cinta
     w: 48, h: 48,
-    vx: 2.5 + Math.random()*1.2, // px per tick (will be moved each BELT_STEP_MS)
-    price, special
+    vx: 70 + Math.random()*10, // px/s, similar a cliente original
+    price,
+    special
   };
   belt.push(br);
+  io.emit('beltUpdate', belt);
 }
+setInterval(spawnBrainrot, SPAWN_INTERVAL_MS);
 
-/* Empezar spawn periódicamente */
-setInterval(()=>spawnBrainrot(), SPAWN_INTERVAL_MS);
-
-/* ---------------- Mover cinta y eliminar al salir ---------------- */
+/* Mover belt en ticks: usamos vx * (tickMs/1000) */
 setInterval(()=>{
-  for(const b of belt) b.x += b.vx;
+  const dt = BELT_TICK_MS / 1000;
+  for(const b of belt) b.x += b.vx * dt;
   // eliminar los que pasan del canvas derecho
   const before = belt.length;
-  belt = belt.filter(b => (b.x + b.w) < CANVAS_WIDTH + 20);
+  belt = belt.filter(b => (b.x + b.w) < CANVAS_WIDTH + 40);
   if(belt.length !== before) io.emit('beltUpdate', belt);
-  // emitir de todas formas para mantener sincronía visual
+  // emitimos regularmente para sincronía visual
   io.emit('beltUpdate', belt);
-}, BELT_STEP_MS);
+}, BELT_TICK_MS);
 
-/* ---------------- Income tick: acumular pending por base ---------------- */
+/* Income tick: acumular pending por base */
 setInterval(()=>{
   let changed = false;
   for(const id in players){
@@ -98,7 +83,6 @@ setInterval(()=>{
     if(!p || !p.base) continue;
     let earned = 0;
     for(const item of p.base.ownedList){
-      // gain formula = price/1000, special *2
       const gain = item.gain || (item.price / 1000 * (item.special ? 2 : 1));
       earned += gain;
     }
@@ -110,7 +94,7 @@ setInterval(()=>{
   if(changed) io.emit('players', players);
 }, INCOME_TICK_MS);
 
-/* ---------------- Socket.IO ---------------- */
+/* Socket handlers */
 io.on('connection', (socket) => {
   console.log('Jugador conectado:', socket.id);
 
@@ -118,7 +102,7 @@ io.on('connection', (socket) => {
   socket.emit('beltUpdate', belt);
   socket.emit('players', players);
 
-  /* JOIN: crear jugador y su base */
+  /* JOIN */
   socket.on('join', (p) => {
     const slot = nextBaseSlot % BASE_SLOTS.length;
     const basePos = BASE_SLOTS[slot];
@@ -133,7 +117,7 @@ io.on('connection', (socket) => {
       base: {
         ownedList: [],
         pending: 0,
-        securityDuration: 60 * 1000, // 60s por defecto
+        securityDuration: 60 * 1000,
         securityUntil: Date.now() + 60*1000,
         slot,
         x: basePos.x,
@@ -146,7 +130,7 @@ io.on('connection', (socket) => {
     io.emit('players', players);
     socket.broadcast.emit('playerJoined', players[socket.id]);
 
-    // opcional: dar 10$ a los demás (como premisa previa)
+    // opcional: dar 10$ a los demás
     for(const id in players){
       if(id !== socket.id){
         players[id].money += 10;
@@ -156,15 +140,47 @@ io.on('connection', (socket) => {
     io.emit('players', players);
   });
 
-  /* MOVE: actualizar posición del jugador */
+  /* MOVE: validar movimiento (prohibir entrar en bases protegidas de otros) */
   socket.on('move', (p) => {
-    if(players[socket.id]){
-      players[socket.id] = { ...players[socket.id], ...p };
-      socket.broadcast.emit('playerMoved', players[socket.id]);
+    const me = players[socket.id];
+    if(!me) return;
+    // cliente envía x,y,w,h
+    const nx = typeof p.x === 'number' ? p.x : me.x;
+    const ny = typeof p.y === 'number' ? p.y : me.y;
+    const nw = p.w || me.w, nh = p.h || me.h;
+    // crear rect hipotético
+    const rect = { x: nx, y: ny, w: nw, h: nh };
+    // comprobar si se interseca con una base ajena protegida
+    let blocked = false;
+    for(const id in players){
+      if(id === socket.id) continue;
+      const other = players[id];
+      if(!other || !other.base) continue;
+      const b = other.base;
+      const baseRect = { x: b.x, y: b.y, w: b.w || 180, h: b.h || 120 };
+      if(Date.now() < (b.securityUntil || 0)){
+        // si se solapan: bloquear
+        if(rect.x < baseRect.x + baseRect.w && rect.x + rect.w > baseRect.x &&
+           rect.y < baseRect.y + baseRect.h && rect.y + rect.h > baseRect.y){
+          blocked = true;
+          break;
+        }
+      }
     }
+    if(blocked){
+      // no aceptar la posición; re-enviar estado completo para corregir cliente
+      socket.emit('actionResult', { ok:false, msg: 'Movimiento bloqueado: base protegida.' });
+      socket.emit('players', players);
+      return;
+    }
+    // aceptar y propagar
+    players[socket.id] = { ...players[socket.id], x: nx, y: ny, w: nw, h: nh, color: p.color || players[socket.id].color, name: p.name || players[socket.id].name };
+    socket.broadcast.emit('playerMoved', players[socket.id]);
+    // también emitimos full players ocasionalmente (mantenemos sincronía)
+    // io.emit('players', players);
   });
 
-  /* setInfo: nombre/color */
+  /* setInfo */
   socket.on('setInfo', (info) => {
     if(players[socket.id]){
       players[socket.id].name = info.name || players[socket.id].name;
@@ -173,18 +189,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  /* BUY: comprar brainrot de la cinta */
+  /* buyBrainrot */
   socket.on('buyBrainrot', (brId) => {
     const me = players[socket.id];
-    if(!me) return socket.emit('actionResult', { ok:false, msg: 'No estás registrado.' });
-
+    if(!me) return socket.emit('actionResult', { ok:false, msg: 'No registrado.' });
     const idx = belt.findIndex(b => b.id === brId);
     if(idx < 0) return socket.emit('actionResult', { ok:false, msg: 'Ese brainrot ya no existe.' });
-
     const br = belt[idx];
     if(me.money < br.price) return socket.emit('actionResult', { ok:false, msg: 'No tienes suficiente dinero.' });
 
-    // realizar compra: descontar, añadir a base, quitar de cinta
     me.money -= br.price;
     const gain = (br.price / 1000) * (br.special ? 2 : 1);
     me.base.ownedList.push({ price: br.price, special: br.special, gain });
@@ -195,7 +208,7 @@ io.on('connection', (socket) => {
     socket.emit('actionResult', { ok:true, msg: `Compraste un brainrot por ${br.price}$` });
   });
 
-  /* SELL: vender desde la base (índice) */
+  /* sellFromBase */
   socket.on('sellFromBase', (index) => {
     const me = players[socket.id];
     if(!me) return;
@@ -207,34 +220,32 @@ io.on('connection', (socket) => {
     socket.emit('actionResult', { ok:true, msg: `Vendiste un brainrot por ${item.price}$` });
   });
 
-  /* UPGRADE security (paga) */
+  /* upgradeSecurity */
   socket.on('upgradeSecurity', () => {
     const me = players[socket.id];
     if(!me) return;
-    const cost = UPGRADE_SECURITY_COST;
-    if(me.money < cost) return socket.emit('actionResult', { ok:false, msg: `No tienes ${cost}$ para mejorar seguridad.` });
-    me.money -= cost;
-    me.base.securityDuration += 30*1000; // +30s
+    if(me.money < UPGRADE_SECURITY_COST) return socket.emit('actionResult', { ok:false, msg: 'No tienes suficiente dinero.' });
+    me.money -= UPGRADE_SECURITY_COST;
+    me.base.securityDuration += 30*1000;
     me.base.securityUntil = Date.now() + me.base.securityDuration;
     io.emit('players', players);
     socket.emit('actionResult', { ok:true, msg: 'Seguridad mejorada.' });
   });
 
-  /* RESET security (gratuito pero solo si ya expiró) */
+  /* resetSecurity (gratuito solo si expiró) */
   socket.on('resetSecurity', () => {
     const me = players[socket.id];
     if(!me) return;
     const now = Date.now();
     if(now < (me.base.securityUntil || 0)){
-      return socket.emit('actionResult', { ok:false, msg: 'La seguridad aún está activa; no puedes reiniciarla todavía.' });
+      return socket.emit('actionResult', { ok:false, msg: 'La seguridad aún está activa.' });
     }
-    // reiniciamos al duration actual (gratuito)
     me.base.securityUntil = Date.now() + me.base.securityDuration;
     io.emit('players', players);
-    socket.emit('actionResult', { ok:true, msg: `Seguridad reiniciada por ${ (me.base.securityDuration/1000) }s.` });
+    socket.emit('actionResult', { ok:true, msg: `Seguridad reiniciada (${me.base.securityDuration/1000}s).` });
   });
 
-  /* COLLECT income (pending -> money) */
+  /* collectIncome */
   socket.on('collectIncome', () => {
     const me = players[socket.id];
     if(!me) return;
@@ -246,18 +257,16 @@ io.on('connection', (socket) => {
     socket.emit('actionResult', { ok:true, msg: `Has recogido ${pending.toFixed(2)}$` });
   });
 
-  /* STEAL: solicitar robar la base de targetId */
+  /* stealRequest */
   socket.on('stealRequest', (targetId) => {
     const thief = players[socket.id];
     const victim = players[targetId];
     if(!thief) return socket.emit('actionResult', { ok:false, msg: 'No estás activo.' });
     if(!victim) return socket.emit('actionResult', { ok:false, msg: 'Objetivo no encontrado.' });
 
-    // comprobación de distancia (usa posiciones que el cliente envía con move)
     const dist = distance(thief, victim);
-    if(dist > 220) return socket.emit('actionResult', { ok:false, msg: 'Estás demasiado lejos de la base para robar.' });
+    if(dist > 220) return socket.emit('actionResult', { ok:false, msg: 'Estás demasiado lejos de la base.' });
 
-    // seguridad
     if(Date.now() < (victim.base.securityUntil || 0)){
       return socket.emit('actionResult', { ok:false, msg: 'La base está protegida por seguridad.' });
     }
@@ -265,13 +274,10 @@ io.on('connection', (socket) => {
     const avail = victim.base.ownedList.length;
     if(avail === 0) return socket.emit('actionResult', { ok:false, msg: 'No hay nada que robar.' });
 
-    // cuántos robar — 1 o 2 (puedes ajustar)
     const take = Math.min(avail, (Math.random() < 0.5 ? 1 : 2));
-    // coger primeros take (si prefieres aleatorio, mezclar array)
     const stolen = victim.base.ownedList.splice(0, take);
     for(const s of stolen) thief.base.ownedList.push(s);
 
-    // reactivar seguridad en víctima (cooldown mínimo 30s)
     victim.base.securityUntil = Date.now() + Math.max(30*1000, victim.base.securityDuration);
     io.emit('players', players);
 
@@ -279,7 +285,7 @@ io.on('connection', (socket) => {
     io.to(targetId).emit('actionResult', { ok:false, msg: `Te han robado ${stolen.length} brainrot(s)!` });
   });
 
-  /* Disconnect */
+  /* disconnect */
   socket.on('disconnect', () => {
     delete players[socket.id];
     io.emit('playerDisconnected', socket.id);
@@ -288,5 +294,5 @@ io.on('connection', (socket) => {
   });
 });
 
-/* arrancar servidor */
+/* arrancar */
 server.listen(PORT, () => console.log('Servidor en puerto', PORT));
