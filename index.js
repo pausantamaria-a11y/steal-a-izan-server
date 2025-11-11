@@ -1,83 +1,107 @@
-import express from "express";
-import http from "http";
-import { Server } from "socket.io";
+// server.js
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, {
+  cors: { origin: "*" }
+});
 
-const players = {};
-const bases = {}; // 🏠 guardará las bases por jugador
+app.use(express.static("."));
 
-function generateBasePosition() {
-  // Genera posiciones diferentes para cada base
-  const x = Math.floor(Math.random() * 800) + 100;
-  const y = Math.floor(Math.random() * 400) + 100;
-  return { x, y };
+const PORT = process.env.PORT || 3000;
+
+// ======= Estado del servidor =======
+let players = {};
+let brainrots = [];
+let nextBrainrotId = 0;
+
+// Genera un brainrot nuevo
+function spawnBrainrot() {
+  const price = Math.floor(Math.random() * 5000) + 100;
+  const special = Math.random() < 0.03;
+  const brainrot = {
+    id: nextBrainrotId++,
+    x: -60,
+    y: 420, // altura fija del cinturón
+    w: 48,
+    h: 48,
+    vx: 70,
+    price,
+    special
+  };
+  brainrots.push(brainrot);
+  io.emit("spawnBrainrot", brainrot);
 }
 
+// Genera brainrots cada 1.2s
+setInterval(spawnBrainrot, 1200);
+
+// ======= SOCKET.IO =======
 io.on("connection", (socket) => {
-  console.log("🟢 Jugador conectado:", socket.id);
+  console.log("Jugador conectado:", socket.id);
 
+  // Enviar estado actual
+  socket.emit("initState", { players, brainrots });
+
+  // Cuando un jugador entra
   socket.on("join", (data) => {
-    // crea jugador
-    players[socket.id] = { ...data, id: socket.id, money: 0 };
-
-    // crea base del jugador
-    bases[socket.id] = {
-      ownerId: socket.id,
-      ownerName: data.name,
+    players[socket.id] = {
+      id: socket.id,
+      name: data.name,
       color: data.color,
-      position: generateBasePosition(),
-      brainrots: Math.floor(Math.random() * 5) + 3 // cantidad aleatoria
+      x: data.x,
+      y: data.y,
+      w: data.w,
+      h: data.h,
+      money: 50,
+      baseX: Math.floor(Math.random() * 700 + 200),
+      baseY: Math.floor(Math.random() * 300 + 100)
     };
 
-    console.log(`👤 ${data.name} entró y se creó su base`);
+    // Regala $10 a todos los jugadores
+    for (const id in players) {
+      if (id !== socket.id) players[id].money += 10;
+    }
 
-    // actualizar a todos los jugadores
     io.emit("players", players);
-    io.emit("bases", bases);
-
-    // 🎁 regalo de bienvenida
-    io.emit("gift", { amount: 10, from: data.name });
   });
 
-  // 🧍 movimiento
+  // Movimiento
   socket.on("move", (data) => {
     if (players[socket.id]) {
-      players[socket.id] = { ...players[socket.id], ...data };
-      io.emit("playerMoved", { ...players[socket.id], id: socket.id });
+      players[socket.id].x = data.x;
+      players[socket.id].y = data.y;
+      players[socket.id].color = data.color;
+      players[socket.id].name = data.name;
+      io.emit("players", players);
     }
   });
 
-  // 🎨 actualizar nombre o color
+  // Cambio de color/nombre
   socket.on("setInfo", (data) => {
     if (players[socket.id]) {
-      players[socket.id].name = data.name || players[socket.id].name;
-      players[socket.id].color = data.color || players[socket.id].color;
-      if (bases[socket.id]) bases[socket.id].color = data.color || bases[socket.id].color;
+      players[socket.id].name = data.name;
+      players[socket.id].color = data.color;
       io.emit("players", players);
-      io.emit("bases", bases);
     }
   });
 
-  // 💸 quitar dinero
-  socket.on("removeMoney", ({ targetId, amount }) => {
-    if (players[targetId]) {
-      players[targetId].money = Math.max(0, (players[targetId].money || 0) - amount);
-      io.emit("moneyUpdated", { id: targetId, money: players[targetId].money });
-    }
+  // Compra de brainrot (lo borra globalmente)
+  socket.on("buyBrainrot", (id) => {
+    brainrots = brainrots.filter((b) => b.id !== id);
+    io.emit("removeBrainrot", id);
   });
 
-  // ❌ desconexión
   socket.on("disconnect", () => {
+    console.log("Jugador desconectado:", socket.id);
     delete players[socket.id];
-    delete bases[socket.id];
-    io.emit("playerDisconnected", socket.id);
-    io.emit("bases", bases);
-    console.log("🔴 Jugador desconectado:", socket.id);
+    io.emit("players", players);
   });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Servidor escuchando en ${PORT}`));
+server.listen(PORT, () => {
+  console.log("Servidor activo en puerto", PORT);
+});
