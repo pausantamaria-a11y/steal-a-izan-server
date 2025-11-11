@@ -1,107 +1,96 @@
 // server.js
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import path from "path";
+import { fileURLToPath } from "url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const server = http.createServer(app);
+const server = createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: { origin: "*" },
 });
 
-app.use(express.static("."));
+app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
 
-// ======= Estado del servidor =======
+// --- Estado global ---
 let players = {};
-let brainrots = [];
-let nextBrainrotId = 0;
+let belt = [];
+let spawnCounter = 0;
 
-// Genera un brainrot nuevo
+// ---- Generar brainrots universales ----
 function spawnBrainrot() {
-  const price = Math.floor(Math.random() * 5000) + 100;
+  spawnCounter++;
+  let price;
+  if (spawnCounter % 3 === 0) price = Math.floor(Math.random() * (15000 - 5000) + 5000);
+  else if (spawnCounter % 3 === 1) price = Math.floor(Math.random() * 500 + 1);
+  else price = Math.floor(Math.random() * (5000 - 500) + 500);
   const special = Math.random() < 0.03;
-  const brainrot = {
-    id: nextBrainrotId++,
+  const br = {
+    id: Date.now() + Math.random(),
     x: -60,
-    y: 420, // altura fija del cinturón
+    y: 420 + Math.random() * 20,
     w: 48,
     h: 48,
     vx: 70,
     price,
-    special
+    special,
   };
-  brainrots.push(brainrot);
-  io.emit("spawnBrainrot", brainrot);
+  belt.push(br);
+  io.emit("beltUpdate", belt);
 }
 
-// Genera brainrots cada 1.2s
-setInterval(spawnBrainrot, 1200);
+setInterval(() => {
+  for (const br of belt) br.x += br.vx * 0.05;
+  belt = belt.filter((b) => b.x + b.w < 900);
+  io.emit("beltUpdate", belt);
+}, 50);
 
-// ======= SOCKET.IO =======
+setInterval(() => spawnBrainrot(), 1200);
+
+// --- Socket events ---
 io.on("connection", (socket) => {
   console.log("Jugador conectado:", socket.id);
 
-  // Enviar estado actual
-  socket.emit("initState", { players, brainrots });
-
-  // Cuando un jugador entra
-  socket.on("join", (data) => {
-    players[socket.id] = {
-      id: socket.id,
-      name: data.name,
-      color: data.color,
-      x: data.x,
-      y: data.y,
-      w: data.w,
-      h: data.h,
-      money: 50,
-      baseX: Math.floor(Math.random() * 700 + 200),
-      baseY: Math.floor(Math.random() * 300 + 100)
-    };
-
-    // Regala $10 a todos los jugadores
-    for (const id in players) {
-      if (id !== socket.id) players[id].money += 10;
-    }
-
+  socket.on("join", (p) => {
+    players[socket.id] = { id: socket.id, ...p };
     io.emit("players", players);
+    socket.emit("beltUpdate", belt);
+
+    // Regalar $10 a todos los demás
+    for (const id in players) {
+      if (id !== socket.id) {
+        io.to(id).emit("addMoney", 10);
+      }
+    }
+
+    socket.broadcast.emit("playerJoined", players[socket.id]);
   });
 
-  // Movimiento
-  socket.on("move", (data) => {
+  socket.on("move", (p) => {
     if (players[socket.id]) {
-      players[socket.id].x = data.x;
-      players[socket.id].y = data.y;
-      players[socket.id].color = data.color;
-      players[socket.id].name = data.name;
-      io.emit("players", players);
+      players[socket.id] = { ...players[socket.id], ...p };
+      socket.broadcast.emit("playerMoved", players[socket.id]);
     }
   });
 
-  // Cambio de color/nombre
-  socket.on("setInfo", (data) => {
-    if (players[socket.id]) {
-      players[socket.id].name = data.name;
-      players[socket.id].color = data.color;
-      io.emit("players", players);
-    }
-  });
-
-  // Compra de brainrot (lo borra globalmente)
   socket.on("buyBrainrot", (id) => {
-    brainrots = brainrots.filter((b) => b.id !== id);
-    io.emit("removeBrainrot", id);
+    // eliminar el brainrot del servidor
+    const index = belt.findIndex((b) => b.id === id);
+    if (index >= 0) {
+      belt.splice(index, 1);
+      io.emit("beltUpdate", belt);
+    }
   });
 
   socket.on("disconnect", () => {
-    console.log("Jugador desconectado:", socket.id);
     delete players[socket.id];
-    io.emit("players", players);
+    io.emit("playerDisconnected", socket.id);
+    console.log("Jugador desconectado:", socket.id);
   });
 });
 
-server.listen(PORT, () => {
-  console.log("Servidor activo en puerto", PORT);
-});
+server.listen(PORT, () => console.log("Servidor en puerto", PORT));
