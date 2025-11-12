@@ -91,16 +91,46 @@ function spawnBrainrot() {
 
 setInterval(spawnBrainrot, SPAWN_INTERVAL_MS);
 
-/* Mover belt en ticks: usamos vx * (tickMs/1000) */
-setInterval(()=>{
+/* Mover belt en ticks: con control de colisiones para evitar solapamientos */
+setInterval(() => {
   const dt = BELT_TICK_MS / 1000;
-  for(const b of belt) b.x += b.vx * dt;
+  const minGap = 60; // distancia mínima entre brainrots (px)
+
+  // Ordenar de izquierda a derecha (x ascendente)
+  belt.sort((a, b) => a.x - b.x);
+
+  for (let i = 0; i < belt.length; i++) {
+    const b = belt[i];
+
+    // Si no es el primer brainrot, comprobar el anterior
+    if (i > 0) {
+      const prev = belt[i - 1];
+
+      // Solo si el anterior está delante (mayor x)
+      const dist = (prev.x - (b.x + b.w));
+
+      if (dist < minGap) {
+        // demasiado cerca: igualar velocidad para mantener distancia
+        b.vx = Math.min(b.vx, prev.vx * 0.98);
+        // y corregir posición para no solaparse
+        b.x = prev.x - prev.w - minGap;
+      } else {
+        // si está lejos, restaurar velocidad base (70–80)
+        b.vx = Math.min(80, b.vx + 5 * dt);
+      }
+    }
+
+    // Avanzar según velocidad
+    b.x += b.vx * dt;
+  }
+
   // eliminar los que pasan del canvas derecho
   const before = belt.length;
-  belt = belt.filter(b => (b.x + b.w) < CANVAS_WIDTH + 40);
-  if(belt.length !== before) io.emit('beltUpdate', belt);
-  // emitimos regularmente para sincronía visual
-  io.emit('beltUpdate', belt);
+  belt = belt.filter((b) => (b.x + b.w) < CANVAS_WIDTH + 40);
+  if (belt.length !== before) io.emit("beltUpdate", belt);
+
+  // emitir estado actualizado
+  io.emit("beltUpdate", belt);
 }, BELT_TICK_MS);
 
 /* Income tick: acumular pending por base */
