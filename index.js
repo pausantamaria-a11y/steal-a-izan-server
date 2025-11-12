@@ -41,26 +41,54 @@ const BASE_SLOTS = [
 function randRange(a,b){ return Math.floor(a + Math.random() * (b - a + 1)); }
 function distance(a,b){ const dx=(a.x||0)-(b.x||0); const dy=(a.y||0)-(b.y||0); return Math.hypot(dx,dy); }
 
-/* Spawn global de brainrots (todos ven los mismos). vx en px/s (coincide con cliente que usa 70) */
-function spawnBrainrot(){
+/* Spawn global de brainrots (todos ven los mismos), centrados y sin solaparse */
+function spawnBrainrot() {
   spawnCounter++;
   let price;
-  if (spawnCounter % 3 === 0) price = randRange(5000,15000);
-  else if (spawnCounter % 3 === 1) price = randRange(1,500);
-  else price = randRange(500,5000);
+  if (spawnCounter % 3 === 0) price = randRange(5000, 15000);
+  else if (spawnCounter % 3 === 1) price = randRange(1, 500);
+  else price = randRange(500, 5000);
+
   const special = Math.random() < 0.03;
+
   const br = {
     id: Date.now() + Math.random(),
-    x: -60 - Math.random()*200, // empieza detrás del borde izquierdo
-    y: BELT_Y + 8 + Math.random() * (BELT_H - 16), // siempre dentro de la cinta
-    w: 48, h: 48,
-    vx: 70 + Math.random()*10, // px/s, similar a cliente original
+    w: 48,
+    h: 48,
+    vx: 70 + Math.random() * 10,
     price,
-    special
+    special,
+    // Posición base centrada en la cinta
+    x: -60 - Math.random() * 200,
+    y: BELT_Y + (BELT_H / 2) - (48 / 2),
   };
+
+  // Evitar solapamiento con brainrots ya existentes
+  let tries = 0;
+  const maxTries = 20;
+  let overlapping;
+
+  do {
+    overlapping = false;
+    for (const other of belt) {
+      if (
+        br.x < other.x + other.w &&
+        br.x + br.w > other.x &&
+        br.y < other.y + other.h &&
+        br.y + br.h > other.y
+      ) {
+        overlapping = true;
+        br.x -= 60; // lo desplazamos un poco más atrás
+        break;
+      }
+    }
+    tries++;
+  } while (overlapping && tries < maxTries);
+
   belt.push(br);
-  io.emit('beltUpdate', belt);
+  io.emit("beltUpdate", belt);
 }
+
 setInterval(spawnBrainrot, SPAWN_INTERVAL_MS);
 
 /* Mover belt en ticks: usamos vx * (tickMs/1000) */
