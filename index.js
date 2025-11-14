@@ -41,96 +41,38 @@ const BASE_SLOTS = [
 function randRange(a,b){ return Math.floor(a + Math.random() * (b - a + 1)); }
 function distance(a,b){ const dx=(a.x||0)-(b.x||0); const dy=(a.y||0)-(b.y||0); return Math.hypot(dx,dy); }
 
-/* Spawn global de brainrots (todos ven los mismos), centrados y sin solaparse */
-function spawnBrainrot() {
+/* Spawn global de brainrots (todos ven los mismos). vx en px/s (coincide con cliente que usa 70) */
+function spawnBrainrot(){
   spawnCounter++;
   let price;
-  if (spawnCounter % 3 === 0) price = randRange(5000, 15000);
-  else if (spawnCounter % 3 === 1) price = randRange(1, 500);
-  else price = randRange(500, 5000);
-
+  if (spawnCounter % 3 === 0) price = randRange(5000,15000);
+  else if (spawnCounter % 3 === 1) price = randRange(1,500);
+  else price = randRange(500,5000);
   const special = Math.random() < 0.03;
-
   const br = {
     id: Date.now() + Math.random(),
-    w: 48,
-    h: 48,
-    vx: 70 + Math.random() * 10,
+    x: -60 - Math.random()*200, // empieza detrás del borde izquierdo
+    y: BELT_Y + 8 + Math.random() * (BELT_H - 16), // siempre dentro de la cinta
+    w: 48, h: 48,
+    vx: 70 + Math.random()*10, // px/s, similar a cliente original
     price,
-    special,
-    // Posición base centrada en la cinta
-    x: -60 - Math.random() * 200,
-    y: BELT_Y + (BELT_H / 2) - (48 / 2),
+    special
   };
-
-  // Evitar solapamiento con brainrots ya existentes
-  let tries = 0;
-  const maxTries = 20;
-  let overlapping;
-
-  do {
-    overlapping = false;
-    for (const other of belt) {
-      if (
-        br.x < other.x + other.w &&
-        br.x + br.w > other.x &&
-        br.y < other.y + other.h &&
-        br.y + br.h > other.y
-      ) {
-        overlapping = true;
-        br.x -= 60; // lo desplazamos un poco más atrás
-        break;
-      }
-    }
-    tries++;
-  } while (overlapping && tries < maxTries);
-
   belt.push(br);
-  io.emit("beltUpdate", belt);
+  io.emit('beltUpdate', belt);
 }
-
 setInterval(spawnBrainrot, SPAWN_INTERVAL_MS);
 
-/* Mover belt en ticks: con control de colisiones para evitar solapamientos */
-setInterval(() => {
+/* Mover belt en ticks: usamos vx * (tickMs/1000) */
+setInterval(()=>{
   const dt = BELT_TICK_MS / 1000;
-  const minGap = 60; // distancia mínima entre brainrots (px)
-
-  // Ordenar de izquierda a derecha (x ascendente)
-  belt.sort((a, b) => a.x - b.x);
-
-  for (let i = 0; i < belt.length; i++) {
-    const b = belt[i];
-
-    // Si no es el primer brainrot, comprobar el anterior
-    if (i > 0) {
-      const prev = belt[i - 1];
-
-      // Solo si el anterior está delante (mayor x)
-      const dist = (prev.x - (b.x + b.w));
-
-      if (dist < minGap) {
-        // demasiado cerca: igualar velocidad para mantener distancia
-        b.vx = Math.min(b.vx, prev.vx * 0.98);
-        // y corregir posición para no solaparse
-        b.x = prev.x - prev.w - minGap;
-      } else {
-        // si está lejos, restaurar velocidad base (70–80)
-        b.vx = Math.min(80, b.vx + 5 * dt);
-      }
-    }
-
-    // Avanzar según velocidad
-    b.x += b.vx * dt;
-  }
-
+  for(const b of belt) b.x += b.vx * dt;
   // eliminar los que pasan del canvas derecho
   const before = belt.length;
-  belt = belt.filter((b) => (b.x + b.w) < CANVAS_WIDTH + 40);
-  if (belt.length !== before) io.emit("beltUpdate", belt);
-
-  // emitir estado actualizado
-  io.emit("beltUpdate", belt);
+  belt = belt.filter(b => (b.x + b.w) < CANVAS_WIDTH + 40);
+  if(belt.length !== before) io.emit('beltUpdate', belt);
+  // emitimos regularmente para sincronía visual
+  io.emit('beltUpdate', belt);
 }, BELT_TICK_MS);
 
 /* Income tick: acumular pending por base */
