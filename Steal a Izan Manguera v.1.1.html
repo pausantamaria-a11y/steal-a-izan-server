@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Steal a Izan Manguera</title>
+  <style>
+    :root{--ui-bg:rgba(0,0,0,0.6);--accent:#2b6cff}
+    html,body{height:100%;margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:#0b4721}
+    #app{display:flex;align-items:flex-start;gap:12px;padding:16px}
+    canvas#game{background:linear-gradient(#72b86b,#4aa85a);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.6)}
+    #ui{width:300px}
+    .card{background:var(--ui-bg);padding:12px;border-radius:10px;color:#fff}
+    h1{margin:0 0 6px;font-size:18px}
+    p{margin:6px 0;color:#ddd}
+    .stat{font-weight:700;font-size:18px}
+    input[type=text]{width:100%;padding:8px;border-radius:6px;border:0}
+    input[type=color]{height:36px;width:56px;border:0;padding:0;background:transparent}
+    button.primary{background:var(--accent);border:0;color:white;padding:8px;border-radius:8px;cursor:pointer}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.08);color:#fff;padding:8px;border-radius:8px;cursor:pointer}
+    .modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6)}
+    .modal-card{background:#0f1720;padding:18px;border-radius:12px;width:420px;color:#fff}
+    label{display:block;font-size:13px;margin:8px 0 4px;color:#cfd8dc}
+    .muted{color:#c0c6c6;font-size:13px}
+    .small{font-size:12px}
+    button:disabled{opacity:0.5;cursor:default}
+  </style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="game" width="1100" height="600"></canvas>
+
+    <div id="ui">
+      <div class="card">
+        <h1>Steal a Izan Manguera</h1>
+        <p class="muted">Jugador: <span id="playerNameDisplay">--</span></p>
+        <p>💵 Dinero: <span id="money" class="stat">50</span>$</p>
+        <p>🧠 Guardados: <span id="storedCount" class="stat">0</span></p>
+        <p>🔁 Ingreso/s (base): <span id="incomeRate" class="stat">0</span>$</p>
+        <p>⏳ Acumulado para cobrar: <span id="pending" class="stat">0</span>$</p>
+        <hr>
+        <button id="upgradeBtn" class="primary" style="width:100%;margin-bottom:8px">🔒 Mejorar seguridad (100$)</button>
+        <button id="resetSecurityBtn" class="ghost" style="width:100%;margin-bottom:8px">🔁 Reiniciar seguridad (gratis si expiró)</button>
+        <button id="collectBtn" class="ghost" style="width:100%;margin-bottom:8px">🧾 Recoger ingresos</button>
+        <p class="muted small">Controles: WASD / Flechas para moverte — E para robar — pasa por encima del brainrot para comprar — clic derecho sobre un brainrot en la base para venderlo.</p>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <h2 style="font-size:14px;margin:0">Configuración</h2>
+        <label>Nombre de jugador</label>
+        <input id="playerName" type="text" placeholder="Tu nombre..." />
+        <label style="margin-top:8px">Color del personaje</label>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          <input id="playerColor" type="color" value="#2b6cff" />
+          <button id="applyCustomization" class="primary">Aplicar</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button id="saveBtn" class="ghost">💾 Guardar</button>
+          <button id="loadBtn" class="ghost">📂 Cargar</button>
+          <button id="resetBtn" class="ghost">🔁 Reiniciar</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <p class="muted small">Consejo: empieza con 50$. Los brainrots tienen precio visible sobre ellos. Los especiales aparecen raramente y dan el doble.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Start modal -->
+  <div id="startModal" class="modal">
+    <div class="modal-card">
+      <h2>Steal a Izan Manguera</h2>
+      <p class="muted">Configura tu nombre y color, luego pulsa Play. Antes de empezar verás los controles.</p>
+      <label>Nombre</label>
+      <input id="startName" type="text" placeholder="Izan..." />
+      <label>Color</label>
+      <input id="startColor" type="color" value="#2b6cff" />
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button id="openControls" class="ghost">Ver controles</button>
+        <button id="playBtn" class="primary">▶ Play</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls modal -->
+  <div id="controlsModal" class="modal" style="display:none">
+    <div class="modal-card">
+      <h3>Controles</h3>
+      <ul>
+        <li>Muévete: WASD o Flechas</li>
+        <li>Comprar brainrot: pasa por encima (si tienes dinero)</li>
+        <li>Cobrar ingresos: pasa por encima de la base dorada</li>
+        <li>Vender en la base: Clic derecho sobre un brainrot almacenado</li>
+        <li>Guardar / Cargar: botones en la UI</li>
+      </ul>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px">
+        <button id="controlsClose" class="primary">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<script>
+/* Cliente actualizado — usa imágenes originales, dibuja belt desde servidor,
+   reinicio de seguridad gratuito (solo cuando expiró) y bloqueo de entrada a bases protegidas.
+*/
+
+const SERVER_URL = "https://steal-a-izan-server.onrender.com"; // ajusta si pruebas local
+const socket = io(SERVER_URL);
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const WIDTH = canvas.width, HEIGHT = canvas.height;
+
+const moneyEl = document.getElementById('money');
+const storedCountEl = document.getElementById('storedCount');
+const pendingEl = document.getElementById('pending');
+const incomeRateEl = document.getElementById('incomeRate');
+const playerNameInput = document.getElementById('playerName');
+const playerColorInput = document.getElementById('playerColor');
+const applyCustomization = document.getElementById('applyCustomization');
+const playerNameDisplay = document.getElementById('playerNameDisplay');
+
+const startModal = document.getElementById('startModal');
+const controlsModal = document.getElementById('controlsModal');
+const startName = document.getElementById('startName');
+const startColor = document.getElementById('startColor');
+const playBtn = document.getElementById('playBtn');
+const openControls = document.getElementById('openControls');
+const controlsClose = document.getElementById('controlsClose');
+
+const saveBtn = document.getElementById('saveBtn');
+const loadBtn = document.getElementById('loadBtn');
+const resetBtn = document.getElementById('resetBtn');
+const upgradeBtn = document.getElementById('upgradeBtn');
+const resetSecurityBtn = document.getElementById('resetSecurityBtn');
+const collectBtn = document.getElementById('collectBtn');
+
+// Imágenes EXACTAS originales
+const imgBR = new Image(); imgBR.crossOrigin='anonymous';
+imgBR.src = 'https://educaciodigital.cat/ieslapineda/moodle/pluginfile.php/517496/user/icon/xtecboost/f1?rev=11638270';
+const imgSpecial = new Image(); imgSpecial.crossOrigin='anonymous';
+imgSpecial.src = 'https://educaciodigital.cat/ieslapineda/moodle/pluginfile.php/517501/user/icon/xtecboost/f1?rev=11639707';
+let assetsLoaded = 0; imgBR.onload = imgSpecial.onload = ()=>assetsLoaded++;
+
+// Estado local
+let local = { x:120, y:HEIGHT-140, w:36, h:48, speed:240, color:'#2b6cff', name:'--' };
+let running = false;
+let belt = []; // proviene del servidor (beltUpdate)
+let serverPlayers = {}; // estado completo de jugadores con base, seguridad, pending, etc.
+let floats = [];
+const attemptedBuys = new Set();
+
+// Utiles
+function rectsOverlap(a,b){ return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+class FloatText{ constructor(x,y,t){this.x=x;this.y=y;this.t=t;this.a=1;} update(){this.y-=0.6;this.a-=0.02;} draw(){ctx.globalAlpha=this.a;ctx.fillStyle='gold';ctx.font='16px Arial';ctx.fillText(this.t,this.x,this.y);ctx.globalAlpha=1;}}
+
+// Entrada / movimiento (con bloqueo a bases protegidas)
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key.toLowerCase()==='e') attemptStealNearby(); });
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+function wouldEnterProtectedBase(newX,newY){
+  // Comprueba si el rect del jugador (newX,newY) interseca una base ajena con seguridad activa
+  const rect = { x:newX, y:newY, w:local.w, h:local.h };
+  for(const id in serverPlayers){
+    if(id === socket.id) continue;
+    const p = serverPlayers[id];
+    if(!p || !p.base) continue;
+    const b = p.base;
+    const baseRect = { x: b.x, y: b.y, w: b.w || 180, h: b.h || 120 };
+    const secUntil = b.securityUntil || 0;
+    if(Date.now() < secUntil){
+      if(rectsOverlap(rect, baseRect)) return true;
+    }
+  }
+  return false;
+}
+
+function playerMove(dt){
+  let dx=0, dy=0;
+  if(keys['arrowleft']||keys['a']) dx--;
+  if(keys['arrowright']||keys['d']) dx++;
+  if(keys['arrowup']||keys['w']) dy--;
+  if(keys['arrowdown']||keys['s']) dy++;
+  const len = Math.hypot(dx,dy) || 1;
+  const nx = local.x + dx/len * local.speed * dt;
+  const ny = local.y + dy/len * local.speed * dt;
+  // límites del canvas
+  const clampedX = Math.max(8, Math.min(WIDTH-local.w-8, nx));
+  const clampedY = Math.max(8, Math.min(HEIGHT-local.h-8, ny));
+  // bloqueo: si entraríamos en una base protegida de otro jugador, no permitimos la entrada
+  if(wouldEnterProtectedBase(clampedX, clampedY)){
+    // opcional: mostrar feedback breve
+    floats.push(new FloatText(local.x, local.y - 12, 'Base protegida'));
+    return; // no mover
+  }
+  local.x = clampedX; local.y = clampedY;
+}
+
+// Posiciones iconos en base (cliente)
+function getBaseIconsPositionsFor(p){
+  const pos=[];
+  if(!p || !p.base) return pos;
+  const cols = 6;
+  const startX = p.base.x + 12;
+  const startY = p.base.y + 18;
+  const len = p.base.ownedList ? p.base.ownedList.length : 0;
+  for(let i=0;i<len;i++){
+    const col = i % cols, row = Math.floor(i/cols);
+    pos.push({ x: startX + col*24, y: startY + row*26, w:16, h:16 });
+  }
+  return pos;
+}
+
+// Compra: si tocas un brainrot de la cinta, pedimos compra al servidor
+function tryBuy(){
+  if(!running) return;
+  const pRect = { x: local.x, y: local.y, w: local.w, h: local.h };
+  for(const br of belt){
+    if(attemptedBuys.has(br.id)) continue;
+    // br proviene del servidor y su y está ya dentro de la cinta
+    if(rectsOverlap(pRect, br)){
+      attemptedBuys.add(br.id);
+      socket.emit('buyBrainrot', br.id);
+      setTimeout(()=>attemptedBuys.delete(br.id), 1200);
+      break;
+    }
+  }
+}
+
+// Vender: clic derecho sobre icono de TU base
+canvas.addEventListener('contextmenu', e=>{
+  e.preventDefault();
+  if(!running) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const me = serverPlayers[socket.id];
+  if(!me || !me.base) return;
+  const icons = getBaseIconsPositionsFor(me);
+  for(let i=0;i<icons.length;i++){
+    const ic = icons[i];
+    if(mx>=ic.x && mx<=ic.x+ic.w && my>=ic.y && my<=ic.y+ic.h){
+      socket.emit('sellFromBase', i);
+      return;
+    }
+  }
+});
+
+// Robar: E cerca de otra base
+function attemptStealNearby(){
+  if(!running) return;
+  for(const id in serverPlayers){
+    if(id === socket.id) continue;
+    const p = serverPlayers[id];
+    if(!p || !p.base) continue;
+    const baseRect = { x: p.base.x, y: p.base.y, w: p.base.w || 180, h: p.base.h || 120 };
+    const playerRect = { x: local.x, y: local.y, w: local.w, h: local.h };
+    if(rectsOverlap(playerRect, baseRect)){
+      socket.emit('stealRequest', id);
+      return;
+    }
+  }
+  floats.push(new FloatText(local.x, local.y-10, 'No hay base cercana'));
+}
+
+// Botones base
+upgradeBtn.onclick = ()=> socket.emit('upgradeSecurity');
+resetSecurityBtn.onclick = ()=> socket.emit('resetSecurity'); // servidor valida expiración y gratis
+collectBtn.onclick = ()=> socket.emit('collectIncome');
+
+// Guardar / Cargar local (config)
+saveBtn.onclick = ()=> {
+  localStorage.setItem('steal_izan_save', JSON.stringify({ name: playerNameInput.value, color: playerColorInput.value }));
+  alert('Guardado local (configuración).');
+};
+loadBtn.onclick = ()=> {
+  const s = JSON.parse(localStorage.getItem('steal_izan_save') || 'null');
+  if(!s) return alert('No hay partida guardada localmente.');
+  playerNameInput.value = s.name || '';
+  playerColorInput.value = s.color || '#2b6cff';
+  alert('Configuración cargada (pulsa Aplicar).');
+};
+resetBtn.onclick = ()=> { if(confirm('Reiniciar (solo local)?')){ localStorage.removeItem('steal_izan_save'); location.reload(); } };
+
+// SOCKET handlers
+socket.on('connect', ()=> console.log('Socket conectado', socket.id));
+
+// belt viene del servidor: posición x,y,w,h,price,special
+socket.on('beltUpdate', (b) => {
+  belt = Array.isArray(b) ? b.map(x => ({ ...x })) : [];
+});
+
+// players es el estado completo con base, securityUntil, pending, money...
+socket.on('players', (data) => {
+  serverPlayers = data || {};
+  const me = serverPlayers[socket.id];
+  if(me){
+    local.color = me.color || local.color;
+    playerNameDisplay.textContent = me.name || '--';
+    moneyEl.textContent = (me.money||0).toFixed(2);
+    storedCountEl.textContent = (me.base && me.base.ownedList) ? me.base.ownedList.length : 0;
+    pendingEl.textContent = (me.base && me.base.pending) ? me.base.pending.toFixed(2) : '0.00';
+    const rate = (me.base && me.base.ownedList) ? me.base.ownedList.reduce((s,i)=>s+(i.gain|| (i.price/1000*(i.special?2:1))),0) : 0;
+    incomeRateEl.textContent = rate.toFixed(2);
+
+    // habilitar/deshabilitar botones en función del estado
+    const now = Date.now();
+    const secUntil = me.base && me.base.securityUntil ? me.base.securityUntil : 0;
+    resetSecurityBtn.disabled = (now < secUntil); // deshabilitado si seguridad activa
+    collectBtn.disabled = !(me.base && me.base.pending && me.base.pending > 0);
+  } else {
+    // no estamos en players (aún): desactivar botones
+    resetSecurityBtn.disabled = true;
+    collectBtn.disabled = true;
+  }
+});
+
+socket.on('playerJoined', p => { if(p && p.id) serverPlayers[p.id] = p; });
+socket.on('playerMoved', p => { if(p && p.id) serverPlayers[p.id] = p; });
+socket.on('playerDisconnected', id => { delete serverPlayers[id]; });
+
+socket.on('actionResult', r => { if(!r) return; floats.push(new FloatText(200,50, r.msg || (r.ok ? 'OK' : 'Error'))); });
+
+// enviar posición a 15Hz
+setInterval(()=>{
+  if(running){
+    socket.emit('move', { x: local.x, y: local.y, color: playerColorInput.value || local.color, name: playerNameInput.value || local.name, w: local.w, h: local.h });
+  }
+}, 1000/15);
+
+// intento de compra 10Hz
+setInterval(()=> tryBuy(), 100);
+
+// Dibujo
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now-last)/1000); last = now;
+  if(running) playerMove(dt);
+  floats = floats.filter(f => (f.update(), f.a > 0));
+
+  // fondo (tiles)
+  ctx.clearRect(0,0,WIDTH,HEIGHT);
+  for(let y=0;y<HEIGHT;y+=20){
+    for(let x=0;x<WIDTH;x+=20){
+      ctx.fillStyle = (x+y)%40===0 ? '#66c66a' : '#5ab05e';
+      ctx.fillRect(x,y,20,20);
+    }
+  }
+
+  // cinta: full width, pero los items usan las coordenadas del servidor
+  const beltY = HEIGHT - 180; // como en tu código original
+  const beltH = 72;
+  ctx.fillStyle = '#2b2b2b';
+  ctx.fillRect(0, beltY, WIDTH, beltH);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, beltY, WIDTH, beltH); ctx.clip();
+  for(let i=-200;i<WIDTH;i+=40){
+    const x = i + ((now/10) % 40);
+    ctx.fillStyle = '#1f1f1f'; ctx.fillRect(x, beltY + 8, 20, beltH - 16);
+  }
+  ctx.restore();
+
+  // dibujar brainrots (desde servidor) — asegurar que y esté dentro de la cinta
+  for(const br of belt){
+    // si por alguna razón el servidor manda y fuera del belt, lo recortamos visualmente
+    const drawY = Math.max(beltY + 4, Math.min(beltY + beltH - br.h - 4, br.y));
+    if(assetsLoaded > 0){
+      if(br.special){
+        ctx.save(); ctx.translate(br.x + br.w/2, drawY + br.h/2); ctx.rotate(-Math.PI/2);
+        ctx.drawImage(imgSpecial, -br.w/2, -br.h/2, br.w, br.h); ctx.restore();
+      } else {
+        ctx.drawImage(imgBR, br.x, drawY, br.w, br.h);
+      }
+    } else {
+      ctx.fillStyle = br.special ? 'orange' : 'blue';
+      ctx.fillRect(br.x, drawY, br.w, br.h);
+    }
+    ctx.fillStyle='white'; ctx.font='12px Arial';
+    ctx.fillText(`$${br.price}`, br.x, drawY - 6);
+  }
+
+  // dibujar bases desde serverPlayers
+  for(const id in serverPlayers){
+    const p = serverPlayers[id];
+    if(!p || !p.base) continue;
+    const b = p.base;
+    const bw = b.w || 180, bh = b.h || 120;
+    ctx.fillStyle = id === socket.id ? '#0e0f1a' : '#111';
+    ctx.fillRect(b.x, b.y, bw, bh);
+    ctx.fillStyle = '#111'; ctx.fillRect(b.x+8, b.y+bh-80, bw-16, 60);
+    ctx.fillStyle = 'gold'; ctx.fillRect(b.x+12, b.y+bh-72, bw-24, 56);
+    ctx.fillStyle = 'white'; ctx.font='12px monospace'; ctx.fillText(p.name || 'Jugador', b.x+8, b.y+14);
+
+    const secLeft = Math.max(0, Math.ceil(((b.securityUntil||0) - Date.now())/1000));
+    ctx.fillStyle = 'white'; ctx.font='11px monospace'; ctx.fillText(`Seg: ${secLeft}s`, b.x + bw - 60, b.y + 14);
+
+    // si la base está protegida, dibujar un borde rojo (visual)
+    if(Date.now() < (b.securityUntil||0)){
+      ctx.strokeStyle = 'rgba(255,80,80,0.9)';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(b.x+2, b.y+2, bw-4, bh-4);
+    }
+
+    // pending visible para propietario
+    if(id === socket.id){
+      ctx.fillStyle='white'; ctx.font='11px monospace';
+      ctx.fillText(`Pend: ${(b.pending||0).toFixed(2)}$`, b.x + 8, b.y + bh - 78);
+    }
+
+    // dibujar iconos en base
+    const icons = getBaseIconsPositionsFor(p);
+    for(let i=0;i<icons.length;i++){
+      const ip = icons[i];
+      const item = p.base.ownedList[i];
+      if(!item) continue;
+      if(assetsLoaded > 0){
+        if(item.special){
+          ctx.save(); ctx.translate(ip.x+8, ip.y+8); ctx.rotate(-Math.PI/2);
+          ctx.drawImage(imgSpecial, -8, -8, 16, 16); ctx.restore();
+        } else {
+          ctx.drawImage(imgBR, ip.x, ip.y, 16, 16);
+        }
+      } else {
+        ctx.fillStyle = item.special ? 'orange' : 'blue';
+        ctx.fillRect(ip.x, ip.y, 16, 16);
+      }
+      ctx.fillStyle='lightgreen'; ctx.font='10px monospace';
+      ctx.fillText(`$${item.price}`, ip.x - 4, ip.y + 26);
+    }
+  }
+
+  // dibujar otros jugadores
+  for(const id in serverPlayers){
+    if(id === socket.id) continue;
+    const op = serverPlayers[id];
+    if(!op) continue;
+    const w = op.w || local.w, h = op.h || local.h;
+    ctx.fillStyle = op.color || '#999';
+    ctx.fillRect(op.x, op.y, w, h);
+    ctx.fillStyle='black'; ctx.font='12px Arial'; ctx.fillText(op.name || 'Jugador', op.x, op.y - 6);
+  }
+
+  // jugador local
+  ctx.fillStyle = playerColorInput.value || local.color;
+  ctx.fillRect(local.x, local.y, local.w, local.h);
+  ctx.fillStyle='black'; ctx.font='12px Arial'; ctx.fillText(playerNameInput.value || local.name || '--', local.x, local.y - 6);
+
+  for(const f of floats) f.draw();
+
+  // actualizar UI numérica dinámica (seguro redundante con players event)
+  const me = serverPlayers[socket.id];
+  if(me){
+    moneyEl.textContent = (me.money||0).toFixed(2);
+    storedCountEl.textContent = (me.base && me.base.ownedList) ? me.base.ownedList.length : 0;
+    pendingEl.textContent = (me.base && me.base.pending) ? me.base.pending.toFixed(2) : '0.00';
+  }
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// UI events
+playBtn.onclick = ()=>{
+  local.color = startColor.value;
+  local.name = startName.value || local.name;
+  playerColorInput.value = startColor.value;
+  playerNameInput.value = startName.value;
+  playerNameDisplay.textContent = startName.value || '--';
+  startModal.style.display = 'none';
+  running = true;
+  socket.emit('join', { name: local.name, color: local.color, x: local.x, y: local.y, w: local.w, h: local.h });
+};
+openControls.onclick = ()=> controlsModal.style.display = 'flex';
+controlsClose.onclick = ()=> controlsModal.style.display = 'none';
+applyCustomization.onclick = ()=>{
+  local.color = playerColorInput.value;
+  playerNameDisplay.textContent = playerNameInput.value || '--';
+  socket.emit('setInfo', { name: playerNameInput.value, color: playerColorInput.value });
+};
+
+// Exponer para debug
+window._stealGame = { socket, local, serverPlayers, belt };
+</script>
+</body>
+</html>
+
