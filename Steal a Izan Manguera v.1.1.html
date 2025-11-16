@@ -430,7 +430,7 @@ function loop(now){
         ctx.fillStyle = item.special ? 'orange' : 'blue';
         ctx.fillRect(ip.x, ip.y, 16, 16);
       }
-      ctx.fillStyle='lightgreen'; ctx.font='10px monospace';
+      ctx.fillStyle='red'; ctx.font='10px monospace';
       ctx.fillText(`$${item.price}`, ip.x - 4, ip.y + 26);
     }
   }
