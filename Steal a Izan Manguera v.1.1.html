@@ -8,7 +8,7 @@
     :root{--ui-bg:rgba(0,0,0,0.6);--accent:#2b6cff}
     html,body{height:100%;margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:#0b4721}
     #app{display:flex;align-items:flex-start;gap:12px;padding:16px}
-canvas#game { background: linear-gradient(#ff0000,#ff9900);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.6)}
+    canvas#game{background:linear-gradient(#72b86b,#4aa85a);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.6)}
     #ui{width:300px}
     .card{background:var(--ui-bg);padding:12px;border-radius:10px;color:#fff}
     h1{margin:0 0 6px;font-size:18px}
@@ -139,14 +139,10 @@ const resetSecurityBtn = document.getElementById('resetSecurityBtn');
 const collectBtn = document.getElementById('collectBtn');
 
 // Imágenes EXACTAS originales
-const imgBR = new Image(); 
-imgBR.crossOrigin='anonymous';
-imgBR.src = 'https://github.com/pausantamaria-a11y/steal-a-izan-server/blob/main/IzanManguera.png?raw=true';
-
-const imgSpecial = new Image(); 
-imgSpecial.crossOrigin='anonymous';
-imgSpecial.src = 'https://github.com/pausantamaria-a11y/steal-a-izan-server/blob/main/SergiBrainrot.jpg?raw=true';
-
+const imgBR = new Image(); imgBR.crossOrigin='anonymous';
+imgBR.src = 'https://educaciodigital.cat/ieslapineda/moodle/pluginfile.php/517496/user/icon/xtecboost/f1?rev=11638270';
+const imgSpecial = new Image(); imgSpecial.crossOrigin='anonymous';
+imgSpecial.src = 'https://educaciodigital.cat/ieslapineda/moodle/pluginfile.php/517501/user/icon/xtecboost/f1?rev=11639707';
 let assetsLoaded = 0; imgBR.onload = imgSpecial.onload = ()=>assetsLoaded++;
 
 // Estado local
@@ -349,7 +345,7 @@ function loop(now){
   ctx.clearRect(0,0,WIDTH,HEIGHT);
   for(let y=0;y<HEIGHT;y+=20){
     for(let x=0;x<WIDTH;x+=20){
-      ctx.fillStyle = 'red';
+      ctx.fillStyle = (x+y)%40===0 ? '#66c66a' : '#5ab05e';
       ctx.fillRect(x,y,20,20);
     }
   }
