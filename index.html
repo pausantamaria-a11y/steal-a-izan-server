@@ -217,6 +217,48 @@ function getBaseIconsPositionsFor(p){
   return pos;
 }
 
+// Layout de bases: ordena las bases top-left → right, luego siguiente fila
+function layoutBases() {
+  const bw = 180; // base default width (coincide con uso en dibujo)
+  const bh = 120; // base default height
+  const marginX = 16;
+  const marginY = 16;
+  const gapX = 20; // separación horizontal entre bases
+  const gapY = 24; // separación vertical entre filas
+
+  // recoger ids con base
+  const ids = Object.keys(serverPlayers).filter(id => serverPlayers[id] && serverPlayers[id].base);
+
+  // orden determinista: por nombre (si existe) luego por id
+  ids.sort((a,b) => {
+    const pa = serverPlayers[a], pb = serverPlayers[b];
+    const na = (pa.name || '').toString().toLowerCase();
+    const nb = (pb.name || '').toString().toLowerCase();
+    if(na !== nb) return na < nb ? -1 : 1;
+    return a < b ? -1 : 1;
+  });
+
+  // calcular número de columnas según el ancho del canvas
+  const cols = Math.max(1, Math.floor((WIDTH - marginX*2 + gapX) / (bw + gapX)));
+
+  for (let i = 0; i < ids.length; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = marginX + col * (bw + gapX);
+    const y = marginY + row * (bh + gapY);
+
+    // sobrescribir la posición de la base en el cliente para que todas las comprobaciones usen el layout
+    const p = serverPlayers[ids[i]];
+    if(p && p.base){
+      p.base.x = x;
+      p.base.y = y;
+      // garantizar que w/h existan si no vienen
+      p.base.w = p.base.w || bw;
+      p.base.h = p.base.h || bh;
+    }
+  }
+}
+
 // Compra: si tocas un brainrot de la cinta, pedimos compra al servidor
 function tryBuy(){
   if(!running) return;
@@ -298,6 +340,9 @@ socket.on('beltUpdate', (b) => {
 // players es el estado completo con base, securityUntil, pending, money...
 socket.on('players', (data) => {
   serverPlayers = data || {};
+  // aplicar layout de bases inmediatamente al recibir nuevo estado
+  layoutBases();
+
   const me = serverPlayers[socket.id];
   if(me){
     local.color = me.color || local.color;
@@ -338,7 +383,7 @@ setInterval(()=> tryBuy(), 100);
 
 // Ensure brainrots are spaced properly on the belt
 function updateBrainrotPositions() {
-  const beltY = HEIGHT - 180; // Belt position
+  const beltY = HEIGHT - 160; // Belt position (desplazado 20px hacia abajo)
   const beltH = 72; // Belt height
   const spacing = 40; // Minimum spacing between brainrots
 
@@ -354,8 +399,8 @@ function updateBrainrotPositions() {
       br.x = prev.x + prev.w + spacing;
     }
 
-    // Ensure brainrots stay within the belt area
-    br.y = Math.max(beltY + 4, Math.min(beltY + beltH - br.h - 4, br.y));
+    // Force vertical centering of each brainrot in the belt
+    br.y = beltY + Math.round((beltH - (br.h || 0)) / 2);
   }
 }
 
@@ -379,7 +424,7 @@ function loop(now){
   }
 
   // cinta: full width, pero los items usan las coordenadas del servidor
-  const beltY = HEIGHT - 180; // como en tu código original
+  const beltY = HEIGHT - 160; // como en tu código original pero desplazado 20px hacia abajo
   const beltH = 72;
   ctx.fillStyle = '#2b2b2b';
   ctx.fillRect(0, beltY, WIDTH, beltH);
@@ -392,8 +437,8 @@ function loop(now){
 
   // dibujar brainrots (desde servidor) — asegurar que y esté dentro de la cinta
   for(const br of belt){
-    // si por alguna razón el servidor manda y fuera del belt, lo recortamos visualmente
-    const drawY = Math.max(beltY + 4, Math.min(beltY + beltH - br.h - 4, br.y));
+    // forzamos dibujo en el centro vertical de la cinta
+    const drawY = beltY + Math.round((beltH - (br.h || 0)) / 2);
     if(assetsLoaded > 0){
       if(br.special){
         // dibujar sin rotación
@@ -410,6 +455,9 @@ function loop(now){
   }
 
   // dibujar bases desde serverPlayers
+  // asegurarnos de recalcular layout por si cambió entre frames
+  layoutBases();
+
   for(const id in serverPlayers){
     const p = serverPlayers[id];
     if(!p || !p.base) continue;
