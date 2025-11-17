@@ -334,12 +334,38 @@ setInterval(()=>{
 // intento de compra 10Hz
 setInterval(()=> tryBuy(), 100);
 
+// Ensure brainrots are spaced properly on the belt
+function updateBrainrotPositions() {
+  const beltY = HEIGHT - 180; // Belt position
+  const beltH = 72; // Belt height
+  const spacing = 40; // Minimum spacing between brainrots
+
+  // Sort brainrots by x-coordinate to ensure proper spacing
+  belt.sort((a, b) => a.x - b.x);
+
+  for (let i = 0; i < belt.length; i++) {
+    const br = belt[i];
+    const prev = belt[i - 1];
+
+    // Adjust position if overlapping with the previous brainrot
+    if (prev && br.x < prev.x + prev.w + spacing) {
+      br.x = prev.x + prev.w + spacing;
+    }
+
+    // Ensure brainrots stay within the belt area
+    br.y = Math.max(beltY + 4, Math.min(beltY + beltH - br.h - 4, br.y));
+  }
+}
+
 // Dibujo
 let last = performance.now();
 function loop(now){
   const dt = Math.min(0.05, (now-last)/1000); last = now;
   if(running) playerMove(dt);
   floats = floats.filter(f => (f.update(), f.a > 0));
+
+  // Update brainrot positions to prevent collapse
+  updateBrainrotPositions();
 
   // fondo (tiles)
   ctx.clearRect(0,0,WIDTH,HEIGHT);
