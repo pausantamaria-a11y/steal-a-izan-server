@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Steal a SergiIzan Manguera</title>
+  <title>Steal a Izan Manguera</title>
   <style>
     :root{--ui-bg:rgba(0,0,0,0.6);--accent:#2b6cff}
     html,body{height:100%;margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:#0b4721}
@@ -140,9 +140,11 @@ const collectBtn = document.getElementById('collectBtn');
 
 // Imágenes EXACTAS originales
 const imgBR = new Image(); imgBR.crossOrigin='anonymous';
-imgBR.src = 'https://github.com/pausantamaria-a11y/steal-a-izan-server/blob/main/IzanManguera.png?raw=true';
+imgBR.src = 'https://raw.githubusercontent.com/pausantamaria-a11y/steal-a-izan-server/main/IzanManguera.png';
+imgBR.onerror = (e)=>{ console.error('Error cargando IzanManguera.png', e); };
 const imgSpecial = new Image(); imgSpecial.crossOrigin='anonymous';
-imgSpecial.src = 'https://github.com/pausantamaria-a11y/steal-a-izan-server/blob/main/SergiBrainrot.jpg?raw=true';
+imgSpecial.src = 'https://raw.githubusercontent.com/pausantamaria-a11y/steal-a-izan-server/main/SergiBrainrot.jpg';
+imgSpecial.onerror = (e)=>{ console.error('Error cargando SergiBrainrot.jpg', e); };
 let assetsLoaded = 0; imgBR.onload = imgSpecial.onload = ()=>assetsLoaded++;
 
 // Estado local
@@ -394,8 +396,8 @@ function loop(now){
     const drawY = Math.max(beltY + 4, Math.min(beltY + beltH - br.h - 4, br.y));
     if(assetsLoaded > 0){
       if(br.special){
-        ctx.save(); ctx.translate(br.x + br.w/2, drawY + br.h/2); ctx.rotate(-Math.PI/2);
-        ctx.drawImage(imgSpecial, -br.w/2, -br.h/2, br.w, br.h); ctx.restore();
+        // dibujar sin rotación
+        ctx.drawImage(imgSpecial, br.x, drawY, br.w, br.h);
       } else {
         ctx.drawImage(imgBR, br.x, drawY, br.w, br.h);
       }
@@ -443,8 +445,8 @@ function loop(now){
       if(!item) continue;
       if(assetsLoaded > 0){
         if(item.special){
-          ctx.save(); ctx.translate(ip.x+8, ip.y+8); ctx.rotate(-Math.PI/2);
-          ctx.drawImage(imgSpecial, -8, -8, 16, 16); ctx.restore();
+          // dibujar icono especial sin rotación
+          ctx.drawImage(imgSpecial, ip.x, ip.y, 16, 16);
         } else {
           ctx.drawImage(imgBR, ip.x, ip.y, 16, 16);
         }
