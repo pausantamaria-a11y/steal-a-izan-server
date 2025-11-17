@@ -41,7 +41,7 @@
         <hr>
         <button id="upgradeBtn" class="primary" style="width:100%;margin-bottom:8px">🔒 Mejorar seguridad (100$)</button>
         <button id="resetSecurityBtn" class="ghost" style="width:100%;margin-bottom:8px">🔁 Reiniciar seguridad (gratis si expiró)</button>
-        <button id="collectBtn" class="ghost" style="width:100%;margin-bottom:8px">🧾 Recoger ingresos</button>
+        <!-- El botón de recoger se ha eliminado: recogida solo mediante pasar por encima de la base -->
         <p class="muted small">Controles: WASD / Flechas para moverte — E para robar — pasa por encima del brainrot para comprar — clic derecho sobre un brainrot en la base para venderlo.</p>
       </div>
 
@@ -136,7 +136,7 @@ const loadBtn = document.getElementById('loadBtn');
 const resetBtn = document.getElementById('resetBtn');
 const upgradeBtn = document.getElementById('upgradeBtn');
 const resetSecurityBtn = document.getElementById('resetSecurityBtn');
-const collectBtn = document.getElementById('collectBtn');
+// const collectBtn = document.getElementById('collectBtn');
 
 // Imágenes EXACTAS originales
 const imgBR = new Image(); imgBR.crossOrigin='anonymous';
@@ -154,6 +154,21 @@ let belt = []; // proviene del servidor (beltUpdate)
 let serverPlayers = {}; // estado completo de jugadores con base, seguridad, pending, etc.
 let floats = [];
 const attemptedBuys = new Set();
+
+// --- auto-collect state & helper ---
+let lastAutoCollect = 0;
+const AUTO_COLLECT_COOLDOWN = 1200; // ms
+
+function getBaseCollectRect(p){
+  if(!p || !p.base) return null;
+  const b = p.base;
+  const bw = b.w || 180, bh = b.h || 120;
+  const x = b.x + 12;
+  const y = b.y + bh - 72;
+  const w = Math.max(0, bw - 24);
+  const h = 56;
+  return { x, y, w, h };
+}
 
 // Utiles
 function rectsOverlap(a,b){ return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
@@ -313,7 +328,7 @@ function attemptStealNearby(){
 // Botones base
 upgradeBtn.onclick = ()=> socket.emit('upgradeSecurity');
 resetSecurityBtn.onclick = ()=> socket.emit('resetSecurity'); // servidor valida expiración y gratis
-collectBtn.onclick = ()=> socket.emit('collectIncome');
+// collectBtn.onclick = ()=> socket.emit('collectIncome');
 
 // Guardar / Cargar local (config)
 saveBtn.onclick = ()=> {
@@ -357,11 +372,11 @@ socket.on('players', (data) => {
     const now = Date.now();
     const secUntil = me.base && me.base.securityUntil ? me.base.securityUntil : 0;
     resetSecurityBtn.disabled = (now < secUntil); // deshabilitado si seguridad activa
-    collectBtn.disabled = !(me.base && me.base.pending && me.base.pending > 0);
+    // collectBtn.disabled = !(me.base && me.base.pending && me.base.pending > 0); // collect por UI se elimina: la recogida se hace automáticamente al pasar por encima de la zona dorada de la base
   } else {
     // no estamos en players (aún): desactivar botones
     resetSecurityBtn.disabled = true;
-    collectBtn.disabled = true;
+    // collectBtn.disabled = true;
   }
 });
 
@@ -531,6 +546,23 @@ function loop(now){
     moneyEl.textContent = (me.money||0).toFixed(2);
     storedCountEl.textContent = (me.base && me.base.ownedList) ? me.base.ownedList.length : 0;
     pendingEl.textContent = (me.base && me.base.pending) ? me.base.pending.toFixed(2) : '0.00';
+  }
+
+  // --- auto-collect: si el jugador está sobre el área dorada de SU base, emitir collectIncome ---
+  if(running){
+    const meLocal = serverPlayers[socket.id];
+    if(meLocal && meLocal.base && (meLocal.base.pending || 0) > 0){
+      const collectRect = getBaseCollectRect(meLocal);
+      const playerRect = { x: local.x, y: local.y, w: local.w, h: local.h };
+      if(collectRect && rectsOverlap(playerRect, collectRect)){
+        const now = Date.now();
+        if(now - lastAutoCollect > AUTO_COLLECT_COOLDOWN){
+          lastAutoCollect = now;
+          socket.emit('collectIncome');
+          floats.push(new FloatText(local.x, local.y - 12, 'Cobrar ingresos'));
+        }
+      }
+    }
   }
 
   requestAnimationFrame(loop);
