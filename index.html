@@ -283,7 +283,11 @@ function tryBuy(){
     // br proviene del servidor y su y está ya dentro de la cinta
     if(rectsOverlap(pRect, br)){
       attemptedBuys.add(br.id);
+      br.targetPlayerId = socket.id; // Asignar el objetivo
+      movingBrainrots.push(br); // Agregar a la lista de movimiento
+      belt.splice(belt.indexOf(br), 1); // Eliminar de la cinta
       socket.emit('buyBrainrot', br.id);
+      floats.push(new FloatText(local.x, local.y - 10, 'Comprando brainrot...'));
       setTimeout(()=>attemptedBuys.delete(br.id), 1200);
       break;
     }
@@ -308,7 +312,40 @@ canvas.addEventListener('contextmenu', e=>{
   }
 });
 
-// Robar: E cerca de otra base
+// Agregar lógica para que los brainrots se muevan hacia la base del jugador al robar o comprar
+const movingBrainrots = []; // Lista de brainrots en movimiento
+
+function moveBrainrots(dt) {
+  for (let i = movingBrainrots.length - 1; i >= 0; i--) {
+    const br = movingBrainrots[i];
+    const targetBase = serverPlayers[br.targetPlayerId]?.base;
+
+    if (!targetBase) {
+      movingBrainrots.splice(i, 1); // Eliminar si no hay base objetivo
+      continue;
+    }
+
+    const targetX = targetBase.x + targetBase.w / 2 - br.w / 2;
+    const targetY = targetBase.y + targetBase.h / 2 - br.h / 2;
+
+    const dx = targetX - br.x;
+    const dy = targetY - br.y;
+    const distance = Math.hypot(dx, dy);
+
+    if (distance < 5) {
+      // Llegó a la base
+      socket.emit('brainrotArrived', { id: br.id, playerId: br.targetPlayerId });
+      movingBrainrots.splice(i, 1);
+    } else {
+      // Mover hacia la base
+      const speed = 100; // Velocidad de movimiento
+      br.x += (dx / distance) * speed * dt;
+      br.y += (dy / distance) * speed * dt;
+    }
+  }
+}
+
+// Modificar la función `attemptStealNearby` para que no cierre la base al robar
 function attemptStealNearby(){
   if(!running) return;
   for(const id in serverPlayers){
@@ -318,8 +355,14 @@ function attemptStealNearby(){
     const baseRect = { x: p.base.x, y: p.base.y, w: p.base.w || 180, h: p.base.h || 120 };
     const playerRect = { x: local.x, y: local.y, w: local.w, h: local.h };
     if(rectsOverlap(playerRect, baseRect)){
-      socket.emit('stealRequest', id);
-      return;
+      const brainrot = belt.find(br => rectsOverlap(playerRect, br));
+      if (brainrot) {
+        brainrot.targetPlayerId = socket.id; // Asignar el objetivo
+        movingBrainrots.push(brainrot); // Agregar a la lista de movimiento
+        belt.splice(belt.indexOf(brainrot), 1); // Eliminar de la cinta
+        floats.push(new FloatText(local.x, local.y - 10, 'Robando brainrot...'));
+        return;
+      }
     }
   }
   floats.push(new FloatText(local.x, local.y-10, 'No hay base cercana'));
@@ -327,8 +370,21 @@ function attemptStealNearby(){
 
 // Botones base
 upgradeBtn.onclick = ()=> socket.emit('upgradeSecurity');
-resetSecurityBtn.onclick = ()=> socket.emit('resetSecurity'); // servidor valida expiración y gratis
-// collectBtn.onclick = ()=> socket.emit('collectIncome');
+// Modificar el botón de reinicio de seguridad para incluir un retraso de 3 segundos
+resetSecurityBtn.onclick = ()=> {
+  const me = serverPlayers[socket.id];
+  if(me && me.base){
+    const now = Date.now();
+    const secUntil = me.base.securityUntil || 0;
+    if(now >= secUntil){
+      resetSecurityBtn.disabled = true; // Deshabilitar el botón temporalmente
+      setTimeout(() => {
+        socket.emit('resetSecurity'); // Enviar la solicitud al servidor después de 3 segundos
+        resetSecurityBtn.disabled = false; // Rehabilitar el botón
+      }, 3000); // Esperar 3 segundos
+    }
+  }
+};
 
 // Guardar / Cargar local (config)
 saveBtn.onclick = ()=> {
@@ -423,7 +479,10 @@ function updateBrainrotPositions() {
 let last = performance.now();
 function loop(now){
   const dt = Math.min(0.05, (now-last)/1000); last = now;
-  if(running) playerMove(dt);
+  if(running) {
+    playerMove(dt);
+    moveBrainrots(dt); // Mover brainrots en cada frame
+  }
   floats = floats.filter(f => (f.update(), f.a > 0));
 
   // Update brainrot positions to prevent collapse
