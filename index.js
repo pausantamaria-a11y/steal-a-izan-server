@@ -379,14 +379,55 @@ io.on('connection', (socket) => {
     if(avail === 0) return socket.emit('actionResult', { ok:false, msg: 'No hay nada que robar.' });
 
     const take = Math.min(avail, (Math.random() < 0.5 ? 1 : 2));
-    const stolen = victim.base.ownedList.splice(0, take);
-    for(const s of stolen) thief.base.ownedList.push(s);
+    // extraemos los items de la víctima (los removemos de su base)
+    const stolenItems = victim.base.ownedList.splice(0, take);
 
+
+    // por cada item robado, creamos una animación desde la posición del icono en la base de la víctima
+    // hacia la base del ladrón. Todos los clientes recibirán 'movingBrainrots'.
+    for (let i = 0; i < stolenItems.length; i++) {
+      const item = stolenItems[i];
+      // posición origen: calc según la grid de iconos (cliente usa cols=6, startX = base.x + 12, startY = base.y + 18)
+      const col = i % 6;
+      const row = Math.floor(i / 6);
+      const startX = (victim.base.x || 0) + 12 + col * 24;
+      const startY = (victim.base.y || 0) + 18 + row * 26;
+
+      // destino: centro de la base del ladrón
+      const targetX = (thief.base.x || 0) + ((thief.base.w || 180) / 2) - 8; // usamos w=16 para icono en movimiento
+      const targetY = (thief.base.y || 0) + ((thief.base.h || 120) / 2) - 8;
+
+      const dx = targetX - startX;
+      const dy = targetY - startY;
+      const distToTarget = Math.hypot(dx, dy);
+      const speed = 140; // px/s, igual que compras
+      const vx = distToTarget > 0 ? (dx / distToTarget) * speed : 0;
+      const vy = distToTarget > 0 ? (dy / distToTarget) * speed : 0;
+
+      movingBrainrots.push({
+        id: `${Date.now()}_${Math.random()}`, // id único
+        x: startX,
+        y: startY,
+        w: 16,
+        h: 16,
+        price: item.price,
+        special: !!item.special,
+        vx, vy,
+        targetPlayerId: socket.id, // llegará a la base del ladrón
+        initiatorId: socket.id,
+        // opcional: conservar gain si lo necesitas luego
+        gain: item.gain
+      });
+    }
+
+    // aplicar seguridad después del robo
     victim.base.securityUntil = Date.now() + Math.max(30*1000, victim.base.securityDuration);
+    // emitir para que todos vean las animaciones y el nuevo estado de players
+    io.emit('movingBrainrots', movingBrainrots);
     emitPlayersUpdated();
 
-    socket.emit('actionResult', { ok:true, msg: `Robaste ${stolen.length} brainrot(s)!` });
-    io.to(targetId).emit('actionResult', { ok:false, msg: `Te han robado ${stolen.length} brainrot(s)!` });
+    socket.emit('actionResult', { ok:true, msg: `Robaste ${stolenItems.length} brainrot(s)!` });
+    io.to(targetId).emit('actionResult', { ok:false, msg: `Te han robado ${stolenItems.length} brainrot(s)!` });
   });
 
   /* disconnect */
