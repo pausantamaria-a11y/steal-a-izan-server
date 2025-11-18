@@ -232,48 +232,6 @@ function getBaseIconsPositionsFor(p){
   return pos;
 }
 
-// Layout de bases: ordena las bases top-left → right, luego siguiente fila
-function layoutBases() {
-  const bw = 180; // base default width (coincide con uso en dibujo)
-  const bh = 120; // base default height
-  const marginX = 16;
-  const marginY = 16;
-  const gapX = 20; // separación horizontal entre bases
-  const gapY = 24; // separación vertical entre filas
-
-  // recoger ids con base
-  const ids = Object.keys(serverPlayers).filter(id => serverPlayers[id] && serverPlayers[id].base);
-
-  // orden determinista: por nombre (si existe) luego por id
-  ids.sort((a,b) => {
-    const pa = serverPlayers[a], pb = serverPlayers[b];
-    const na = (pa.name || '').toString().toLowerCase();
-    const nb = (pb.name || '').toString().toLowerCase();
-    if(na !== nb) return na < nb ? -1 : 1;
-    return a < b ? -1 : 1;
-  });
-
-  // calcular número de columnas según el ancho del canvas
-  const cols = Math.max(1, Math.floor((WIDTH - marginX*2 + gapX) / (bw + gapX)));
-
-  for (let i = 0; i < ids.length; i++) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const x = marginX + col * (bw + gapX);
-    const y = marginY + row * (bh + gapY);
-
-    // sobrescribir la posición de la base en el cliente para que todas las comprobaciones usen el layout
-    const p = serverPlayers[ids[i]];
-    if(p && p.base){
-      p.base.x = x;
-      p.base.y = y;
-      // garantizar que w/h existan si no vienen
-      p.base.w = p.base.w || bw;
-      p.base.h = p.base.h || bh;
-    }
-  }
-}
-
 // Compra: si tocas un brainrot de la cinta, pedimos compra al servidor
 function tryBuy(){
   if(!running) return;
@@ -372,8 +330,7 @@ socket.on('beltUpdate', (b) => {
 // players es el estado completo con base, securityUntil, pending, money...
 socket.on('players', (data) => {
   serverPlayers = data || {};
-  // aplicar layout de bases inmediatamente al recibir nuevo estado
-  layoutBases();
+  // Nota: el servidor asigna la posición de las bases; aquí solo usamos el estado recibido.
 
   const me = serverPlayers[socket.id];
   if(me){
@@ -504,8 +461,7 @@ function loop(now){
   }
 
   // dibujar bases desde serverPlayers
-  // asegurarnos de recalcular layout por si cambió entre frames
-  layoutBases();
+  // El layout ya viene del servidor (serverLayoutBases).
 
   for(const id in serverPlayers){
     const p = serverPlayers[id];
