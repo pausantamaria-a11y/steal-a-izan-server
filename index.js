@@ -174,8 +174,8 @@ io.on('connection', (socket) => {
 
   /* JOIN */
   socket.on('join', (p) => {
-    const slot = nextBaseSlot % BASE_SLOTS.length;
-    nextBaseSlot++;
+    // asignar slot incremental (orden de llegada). No hacer wrap: slot 0 será siempre la primera base (arriba-izquierda)
+    const slot = nextBaseSlot++;
     players[socket.id] = {
        id: socket.id,
        name: (p.name && p.name.trim()) ? p.name : `Jugador_${socket.id.slice(0,4)}`,
@@ -193,7 +193,7 @@ io.on('connection', (socket) => {
          h: 120
        }
      };
-    // emitir usando helper que asigna layout de bases
+    // emitir usando helper que asigna layout de bases (coloca por slot: 0 -> top-left, luego a la derecha, etc.)
     emitPlayersUpdated();
     socket.broadcast.emit('playerJoined', players[socket.id]);
 
