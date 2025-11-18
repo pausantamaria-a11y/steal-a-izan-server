@@ -390,8 +390,11 @@ io.on('connection', (socket) => {
       // posición origen: calc según la grid de iconos (cliente usa cols=6, startX = base.x + 12, startY = base.y + 18)
       const col = i % 6;
       const row = Math.floor(i / 6);
-      const startX = (victim.base.x || 0) + 12 + col * 24;
-      const startY = (victim.base.y || 0) + 18 + row * 26;
+      const iconX = (victim.base.x || 0) + 12 + col * 24; // icon top-left (16x16)
+      const iconY = (victim.base.y || 0) + 18 + row * 26;
+      // queremos que la animación use 48x48 (igual que la cinta). Centrar el sprite grande sobre el icono pequeño:
+      const startX = iconX + 8 - 24; // icon center - bigHalf (8 - 24 = -16)
+      const startY = iconY + 8 - 24;
 
       // destino: centro de la base del ladrón
       const targetX = (thief.base.x || 0) + ((thief.base.w || 180) / 2) - 8; // usamos w=16 para icono en movimiento
@@ -408,8 +411,8 @@ io.on('connection', (socket) => {
         id: `${Date.now()}_${Math.random()}`, // id único
         x: startX,
         y: startY,
-        w: 16,
-        h: 16,
+        w: 48,
+        h: 48,
         price: item.price,
         special: !!item.special,
         vx, vy,
