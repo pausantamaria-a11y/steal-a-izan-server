@@ -28,6 +28,7 @@ let players = {}; // id -> { id,name,color,x,y,w,h,money, base:{ownedList:[], pe
 let belt = [];
 let spawnCounter = 0;
 let nextBaseSlot = 0;
+let movingBrainrots = []; // brainrots que están en tránsito hacia una base
 
 const BASE_SLOTS = [
   { x: 720, y: 60 },
@@ -64,7 +65,7 @@ function spawnBrainrot(){
 setInterval(spawnBrainrot, SPAWN_INTERVAL_MS);
 
 /* Mover belt en ticks: usamos vx * (tickMs/1000) */
-setInterval(()=>{
+setInterval(()=>{ 
   const dt = BELT_TICK_MS / 1000;
   for(const b of belt) b.x += b.vx * dt;
   // eliminar los que pasan del canvas derecho
@@ -73,6 +74,46 @@ setInterval(()=>{
   if(belt.length !== before) io.emit('beltUpdate', belt);
   // emitimos regularmente para sincronía visual
   io.emit('beltUpdate', belt);
+
+  // actualizar brainrots en movimiento
+  if(movingBrainrots.length > 0){
+    let changed = false;
+    for(let i = movingBrainrots.length - 1; i >= 0; i--){
+      const m = movingBrainrots[i];
+      const dtSeg = dt;
+      // avanzar según velocidad
+      m.x += m.vx * dtSeg;
+      m.y += m.vy * dtSeg;
+      // comprobar llegada (si existe base destino)
+      const target = players[m.targetPlayerId];
+      if(!target || !target.base){
+        // refund: devolver dinero al jugador y eliminar movimiento
+        if(players[m.initiatorId]) players[m.initiatorId].money += m.price;
+        movingBrainrots.splice(i,1);
+        changed = true;
+        continue;
+      }
+      const tx = target.base.x + (target.base.w||180)/2 - m.w/2;
+      const ty = target.base.y + (target.base.h||120)/2 - m.h/2;
+      const dist = Math.hypot(tx - m.x, ty - m.y);
+      if(dist < 6){
+        // llegó: añadir a la base del targetPlayerId
+        const gain = (m.price / 1000) * (m.special ? 2 : 1);
+        players[m.targetPlayerId].base.ownedList.push({ price: m.price, special: m.special, gain });
+        // notificar llegada
+        io.to(m.targetPlayerId).emit('actionResult', { ok:true, msg: `Brainrot llegado (${m.price}$)` });
+        movingBrainrots.splice(i,1);
+        changed = true;
+      }
+    }
+    if(changed) {
+      io.emit('movingBrainrots', movingBrainrots);
+      io.emit('players', players);
+    } else {
+      // si solo han cambiado posiciones, emitimos la lista para que clientes animen
+      io.emit('movingBrainrots', movingBrainrots);
+    }
+  }
 }, BELT_TICK_MS);
 
 /* Income tick: acumular pending por base */
@@ -198,13 +239,39 @@ io.on('connection', (socket) => {
     const br = belt[idx];
     if(me.money < br.price) return socket.emit('actionResult', { ok:false, msg: 'No tienes suficiente dinero.' });
 
+    // reservar: descontar dinero ya para evitar race conditions
     me.money -= br.price;
-    const gain = (br.price / 1000) * (br.special ? 2 : 1);
-    me.base.ownedList.push({ price: br.price, special: br.special, gain });
+    // crear objeto de movimiento con destino la base del comprador
+    const targetBase = me.base;
+    if(!targetBase){
+      // si por alguna razón no hay base, refund
+      me.money += br.price;
+      return socket.emit('actionResult', { ok:false, msg: 'No tienes base válida.' });
+    }
+    const tx = targetBase.x + (targetBase.w||180)/2 - br.w/2;
+    const ty = targetBase.y + (targetBase.h||120)/2 - br.h/2;
+    const dx = tx - br.x;
+    const dy = ty - br.y;
+    const distance_ = Math.hypot(dx, dy);
+    const speed = 140; // px/s server-side
+    const vx = (distance_ > 0) ? (dx / distance_) * speed : 0;
+    const vy = (distance_ > 0) ? (dy / distance_) * speed : 0;
+
+    const moving = {
+      id: br.id,
+      x: br.x, y: br.y, w: br.w, h: br.h,
+      price: br.price, special: br.special,
+      vx, vy,
+      targetPlayerId: socket.id,
+      initiatorId: socket.id
+    };
+    movingBrainrots.push(moving);
+    // quitar de la cinta
     belt.splice(idx, 1);
 
     io.emit('beltUpdate', belt);
-    io.emit('players', players);
+    io.emit('movingBrainrots', movingBrainrots);
+    io.emit('players', players); // actualizamos dinero en todos
     socket.emit('actionResult', { ok:true, msg: `Compraste un brainrot por ${br.price}$` });
   });
 
