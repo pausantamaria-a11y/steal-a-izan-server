@@ -30,6 +30,17 @@ let spawnCounter = 0;
 let nextBaseSlot = 0;
 let movingBrainrots = []; // brainrots que están en tránsito hacia una base
 
+// --- utilidades faltantes añadidas ---
+function randRange(a, b) {
+  return Math.floor(a + Math.random() * (b - a + 1));
+}
+function distance(a, b) {
+  const dx = (a.x || 0) - (b.x || 0);
+  const dy = (a.y || 0) - (b.y || 0);
+  return Math.hypot(dx, dy);
+}
+// --- fin utilidades ---
+
 // layout de bases en servidor: asigna x/y/w/h a cada base en cuadrícula
 function serverLayoutBases() {
   const bw = 180, bh = 120;
