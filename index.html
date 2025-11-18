@@ -446,20 +446,6 @@ function loop(now){
     ctx.fillText(`$${br.price}`, br.x, drawY - 6);
   }
 
-  // dibujar brainrots en movimiento (animación orquestada por el servidor)
-  for(const m of movingBrainrots){
-    const drawY = Math.round(m.y || 0);
-    if(assetsLoaded > 0){
-      if(m.special) ctx.drawImage(imgSpecial, m.x, drawY, m.w, m.h);
-      else ctx.drawImage(imgBR, m.x, drawY, m.w, m.h);
-    } else {
-      ctx.fillStyle = m.special ? 'orange' : 'blue';
-      ctx.fillRect(m.x, drawY, m.w, m.h);
-    }
-    ctx.fillStyle='white'; ctx.font='12px Arial';
-    ctx.fillText(`$${m.price}`, m.x, drawY - 6);
-  }
-
   // dibujar bases desde serverPlayers
   // El layout ya viene del servidor (serverLayoutBases).
 
@@ -510,6 +496,20 @@ function loop(now){
       ctx.fillStyle='lightgreen'; ctx.font='10px monospace';
       ctx.fillText(`$${item.price}`, ip.x - 4, ip.y + 26);
     }
+  }
+
+  // dibujar brainrots en movimiento (animación orquestada por el servidor)
+  for(const m of movingBrainrots){
+    const drawY = Math.round(m.y || 0);
+    if(assetsLoaded > 0){
+      if(m.special) ctx.drawImage(imgSpecial, m.x, drawY, m.w, m.h);
+      else ctx.drawImage(imgBR, m.x, drawY, m.w, m.h);
+    } else {
+      ctx.fillStyle = m.special ? 'orange' : 'blue';
+      ctx.fillRect(m.x, drawY, m.w, m.h);
+    }
+    ctx.fillStyle='white'; ctx.font='12px Arial';
+    ctx.fillText(`$${m.price}`, m.x, drawY - 6);
   }
 
   // dibujar otros jugadores
