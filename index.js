@@ -30,17 +30,42 @@ let spawnCounter = 0;
 let nextBaseSlot = 0;
 let movingBrainrots = []; // brainrots que están en tránsito hacia una base
 
-const BASE_SLOTS = [
-  { x: 720, y: 60 },
-  { x: 920, y: 60 },
-  { x: 720, y: 260 },
-  { x: 920, y: 260 },
-  { x: 720, y: 460 },
-  { x: 920, y: 460 },
-];
+// layout de bases en servidor: asigna x/y/w/h a cada base en cuadrícula
+function serverLayoutBases() {
+  const bw = 180, bh = 120;
+  const marginX = 16, marginY = 16;
+  const gapX = 20, gapY = 24;
 
-function randRange(a,b){ return Math.floor(a + Math.random() * (b - a + 1)); }
-function distance(a,b){ const dx=(a.x||0)-(b.x||0); const dy=(a.y||0)-(b.y||0); return Math.hypot(dx,dy); }
+  const ids = Object.keys(players).filter(id => players[id] && players[id].base);
+  // orden determinista: por nombre (si existe) luego por id
+  ids.sort((a,b) => {
+    const pa = players[a], pb = players[b];
+    const na = (pa.name || '').toString().toLowerCase();
+    const nb = (pb.name || '').toString().toLowerCase();
+    if(na !== nb) return na < nb ? -1 : 1;
+    return a < b ? -1 : 1;
+  });
+
+  const cols = Math.max(1, Math.floor((CANVAS_WIDTH - marginX*2 + gapX) / (bw + gapX)));
+  for (let i = 0; i < ids.length; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = marginX + col * (bw + gapX);
+    const y = marginY + row * (bh + gapY);
+    const p = players[ids[i]];
+    if (p && p.base) {
+      p.base.x = x;
+      p.base.y = y;
+      p.base.w = p.base.w || bw;
+      p.base.h = p.base.h || bh;
+    }
+  }
+}
+
+function emitPlayersUpdated() {
+  serverLayoutBases();
+  io.emit('players', players);
+}
 
 /* Spawn global de brainrots (todos ven los mismos). vx en px/s (coincide con cliente que usa 70) */
 function spawnBrainrot(){
@@ -108,7 +133,7 @@ setInterval(()=>{
     }
     if(changed) {
       io.emit('movingBrainrots', movingBrainrots);
-      io.emit('players', players);
+      emitPlayersUpdated();
     } else {
       // si solo han cambiado posiciones, emitimos la lista para que clientes animen
       io.emit('movingBrainrots', movingBrainrots);
@@ -146,29 +171,26 @@ io.on('connection', (socket) => {
   /* JOIN */
   socket.on('join', (p) => {
     const slot = nextBaseSlot % BASE_SLOTS.length;
-    const basePos = BASE_SLOTS[slot];
     nextBaseSlot++;
-
     players[socket.id] = {
-      id: socket.id,
-      name: (p.name && p.name.trim()) ? p.name : `Jugador_${socket.id.slice(0,4)}`,
-      color: p.color || '#2b6cff',
-      x: p.x || 120, y: p.y || 420, w: p.w || 36, h: p.h || 48,
-      money: 50,
-      base: {
-        ownedList: [],
-        pending: 0,
-        securityDuration: 60 * 1000,
-        securityUntil: Date.now() + 60*1000,
-        slot,
-        x: basePos.x,
-        y: basePos.y,
-        w: 180,
-        h: 120
-      }
-    };
-
-    io.emit('players', players);
+       id: socket.id,
+       name: (p.name && p.name.trim()) ? p.name : `Jugador_${socket.id.slice(0,4)}`,
+       color: p.color || '#2b6cff',
+       x: p.x || 120, y: p.y || 420, w: p.w || 36, h: p.h || 48,
+       money: 50,
+       base: {
+         ownedList: [],
+         pending: 0,
+         securityDuration: 60 * 1000,
+         securityUntil: Date.now() + 60*1000,
+         slot,
+         // x/y/w/h se asignan desde serverLayoutBases() al emitir players
+         w: 180,
+         h: 120
+       }
+     };
+    // emitir usando helper que asigna layout de bases
+    emitPlayersUpdated();
     socket.broadcast.emit('playerJoined', players[socket.id]);
 
     // opcional: dar 10$ a los demás
@@ -178,7 +200,7 @@ io.on('connection', (socket) => {
         io.to(id).emit('actionResult', { ok:true, msg: 'Recibiste 10$ por un nuevo jugador.' });
       }
     }
-    io.emit('players', players);
+    emitPlayersUpdated();
   });
 
   /* MOVE: validar movimiento (prohibir entrar en bases protegidas de otros) */
@@ -271,7 +293,7 @@ io.on('connection', (socket) => {
 
     io.emit('beltUpdate', belt);
     io.emit('movingBrainrots', movingBrainrots);
-    io.emit('players', players); // actualizamos dinero en todos
+    emitPlayersUpdated(); // aplica layout y emite players
     socket.emit('actionResult', { ok:true, msg: `Compraste un brainrot por ${br.price}$` });
   });
 
@@ -283,7 +305,7 @@ io.on('connection', (socket) => {
     if(isNaN(i) || i < 0 || i >= me.base.ownedList.length) return socket.emit('actionResult', { ok:false, msg: 'Ítem inválido.' });
     const item = me.base.ownedList.splice(i,1)[0];
     me.money += item.price;
-    io.emit('players', players);
+    emitPlayersUpdated();
     socket.emit('actionResult', { ok:true, msg: `Vendiste un brainrot por ${item.price}$` });
   });
 
@@ -295,7 +317,7 @@ io.on('connection', (socket) => {
     me.money -= UPGRADE_SECURITY_COST;
     me.base.securityDuration += 30*1000;
     me.base.securityUntil = Date.now() + me.base.securityDuration;
-    io.emit('players', players);
+    emitPlayersUpdated();
     socket.emit('actionResult', { ok:true, msg: 'Seguridad mejorada.' });
   });
 
@@ -308,7 +330,7 @@ io.on('connection', (socket) => {
       return socket.emit('actionResult', { ok:false, msg: 'La seguridad aún está activa.' });
     }
     me.base.securityUntil = Date.now() + me.base.securityDuration;
-    io.emit('players', players);
+    emitPlayersUpdated();
     socket.emit('actionResult', { ok:true, msg: `Seguridad reiniciada (${me.base.securityDuration/1000}s).` });
   });
 
@@ -320,7 +342,7 @@ io.on('connection', (socket) => {
     if(pending <= 0) return socket.emit('actionResult', { ok:false, msg: 'No tienes ingresos pendientes.' });
     me.money += pending;
     me.base.pending = 0;
-    io.emit('players', players);
+    emitPlayersUpdated();
     socket.emit('actionResult', { ok:true, msg: `Has recogido ${pending.toFixed(2)}$` });
   });
 
@@ -346,7 +368,7 @@ io.on('connection', (socket) => {
     for(const s of stolen) thief.base.ownedList.push(s);
 
     victim.base.securityUntil = Date.now() + Math.max(30*1000, victim.base.securityDuration);
-    io.emit('players', players);
+    emitPlayersUpdated();
 
     socket.emit('actionResult', { ok:true, msg: `Robaste ${stolen.length} brainrot(s)!` });
     io.to(targetId).emit('actionResult', { ok:false, msg: `Te han robado ${stolen.length} brainrot(s)!` });
@@ -356,7 +378,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     delete players[socket.id];
     io.emit('playerDisconnected', socket.id);
-    io.emit('players', players);
+    emitPlayersUpdated();
     console.log('Jugador desconectado:', socket.id);
   });
 });
