@@ -37,9 +37,13 @@ function serverLayoutBases() {
   const gapX = 20, gapY = 24;
 
   const ids = Object.keys(players).filter(id => players[id] && players[id].base);
-  // orden determinista: por nombre (si existe) luego por id
+  // ordenar por slot (orden de llegada) → garantiza top-left → right → siguiente fila según orden de join.
+  // fallback por nombre/ID si no hay slot.
   ids.sort((a,b) => {
     const pa = players[a], pb = players[b];
+    const sa = (pa.base && typeof pa.base.slot === 'number') ? pa.base.slot : Number.MAX_SAFE_INTEGER;
+    const sb = (pb.base && typeof pb.base.slot === 'number') ? pb.base.slot : Number.MAX_SAFE_INTEGER;
+    if(sa !== sb) return sa - sb;
     const na = (pa.name || '').toString().toLowerCase();
     const nb = (pb.name || '').toString().toLowerCase();
     if(na !== nb) return na < nb ? -1 : 1;
