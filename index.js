@@ -379,36 +379,29 @@ io.on('connection', (socket) => {
     if(avail === 0) return socket.emit('actionResult', { ok:false, msg: 'No hay nada que robar.' });
 
     const take = Math.min(avail, (Math.random() < 0.5 ? 1 : 2));
-    // extraemos los items de la víctima (los removemos de su base)
     const stolenItems = victim.base.ownedList.splice(0, take);
 
-
-    // por cada item robado, creamos una animación desde la posición del icono en la base de la víctima
-    // hacia la base del ladrón. Todos los clientes recibirán 'movingBrainrots'.
     for (let i = 0; i < stolenItems.length; i++) {
       const item = stolenItems[i];
-      // posición origen: calc según la grid de iconos (cliente usa cols=6, startX = base.x + 12, startY = base.y + 18)
       const col = i % 6;
       const row = Math.floor(i / 6);
-      const iconX = (victim.base.x || 0) + 12 + col * 24; // icon top-left (16x16)
+      const iconX = (victim.base.x || 0) + 12 + col * 24;
       const iconY = (victim.base.y || 0) + 18 + row * 26;
-      // queremos que la animación use 48x48 (igual que la cinta). Centrar el sprite grande sobre el icono pequeño:
-      const startX = iconX + 8 - 24; // icon center - bigHalf (8 - 24 = -16)
+      const startX = iconX + 8 - 24;
       const startY = iconY + 8 - 24;
 
-      // destino: centro de la base del ladrón
-      const targetX = (thief.base.x || 0) + ((thief.base.w || 180) / 2) - 8; // usamos w=16 para icono en movimiento
+      const targetX = (thief.base.x || 0) + ((thief.base.w || 180) / 2) - 8;
       const targetY = (thief.base.y || 0) + ((thief.base.h || 120) / 2) - 8;
 
       const dx = targetX - startX;
       const dy = targetY - startY;
       const distToTarget = Math.hypot(dx, dy);
-      const speed = 140; // px/s, igual que compras
+      const speed = 140;
       const vx = distToTarget > 0 ? (dx / distToTarget) * speed : 0;
       const vy = distToTarget > 0 ? (dy / distToTarget) * speed : 0;
 
       movingBrainrots.push({
-        id: `${Date.now()}_${Math.random()}`, // id único
+        id: `${Date.now()}_${Math.random()}`,
         x: startX,
         y: startY,
         w: 48,
@@ -416,16 +409,12 @@ io.on('connection', (socket) => {
         price: item.price,
         special: !!item.special,
         vx, vy,
-        targetPlayerId: socket.id, // llegará a la base del ladrón
+        targetPlayerId: socket.id,
         initiatorId: socket.id,
-        // opcional: conservar gain si lo necesitas luego
         gain: item.gain
       });
     }
 
-    // aplicar seguridad después del robo
-    victim.base.securityUntil = Date.now() + Math.max(30*1000, victim.base.securityDuration);
-    // emitir para que todos vean las animaciones y el nuevo estado de players
     io.emit('movingBrainrots', movingBrainrots);
     emitPlayersUpdated();
 
