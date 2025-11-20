@@ -270,7 +270,7 @@ canvas.addEventListener('contextmenu', e=>{
 let movingBrainrots = [];
 socket.on('movingBrainrots', (arr) => { movingBrainrots = Array.isArray(arr) ? arr.map(x => ({ ...x })) : []; });
 
-// mantener attemptStealNearby (sin cambiar) — deja robos instantáneos como antes
+// Modificar la función attemptStealNearby para que los brainrots robados se animen hacia la base del jugador que los roba
 function attemptStealNearby(){
   if(!running) return;
   for(const id in serverPlayers){
@@ -281,6 +281,24 @@ function attemptStealNearby(){
     const playerRect = { x: local.x, y: local.y, w: local.w, h: local.h };
     if(rectsOverlap(playerRect, baseRect)){
       socket.emit('stealRequest', id);
+      socket.on('movingBrainrots', (arr) => {
+        movingBrainrots = Array.isArray(arr) ? arr.map(brainrot => {
+          if (brainrot.targetPlayerId === socket.id) {
+            const targetBase = serverPlayers[socket.id]?.base;
+            if (targetBase) {
+              const targetX = targetBase.x + (targetBase.w || 180) / 2 - brainrot.w / 2;
+              const targetY = targetBase.y + (targetBase.h || 120) / 2 - brainrot.h / 2;
+              const dx = targetX - brainrot.x;
+              const dy = targetY - brainrot.y;
+              const distance = Math.hypot(dx, dy);
+              const speed = 140; // px/s
+              brainrot.vx = distance > 0 ? (dx / distance) * speed : 0;
+              brainrot.vy = distance > 0 ? (dy / distance) * speed : 0;
+            }
+          }
+          return brainrot;
+        }) : [];
+      });
       return;
     }
   }
@@ -583,3 +601,4 @@ window._stealGame = { socket, local, serverPlayers, belt };
 </script>
 </body>
 </html>
+``` 
